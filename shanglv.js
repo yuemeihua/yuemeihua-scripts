@@ -3,11 +3,19 @@
 // @namespace    https://example.com/
 // @version      1.0
 // @description  在携程商旅乘客页自动填写护照信息（SSR DOCS 格式解析；支持自动添加乘机人；支持性别/姓名/出生日期/国籍等自动填充）
+// @author       胡朗
 // @match        https://ct.ctrip.com/corp-flight-booking/*
 // @grant        none
 // @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/shanglv.js
+// @downloadURL  https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/shanglv.js
 // ==/UserScript==
 
+/*
+更新日志：
+v1.0 (2025-09-26)
+- 初始版本：支持姓名、性别、出生日期、国籍自动填充
+*/
 (function () {
   'use strict';
 

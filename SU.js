@@ -3,11 +3,20 @@
 // @namespace    https://example.com/
 // @version      1.0
 // @description  在 Aeroflot 乘客页自动填写护照信息
+// @author       胡朗
 // @match        https://www.aeroflot.ru/sb/app/ru-en/*
 // @match        https://www.aeroflot.ru/sb/app/*
 // @grant        none
 // @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/SU.js
+// @downloadURL  https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/SU.js
 // ==/UserScript==
+
+/*
+更新日志：
+v1.0 (2025-09-26)
+- 初始版本：支持姓名、性别、出生日期、国籍自动填充
+*/
 
 (function () {
   'use strict';
