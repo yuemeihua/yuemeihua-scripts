@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         携程商旅乘机人自动填写 (SSR DOCS 解析)
 // @namespace    https://example.com/
-// @version      1.5
+// @version      1.6
 // @description  在携程商旅乘客页自动填写护照信息（SSR DOCS 格式解析；支持自动添加乘机人；支持性别/姓名/出生日期/国籍等自动填充）
 // @author       胡朗
 // @match        https://ct.ctrip.com/corp-flight-booking/*
@@ -10,6 +10,12 @@
 // @updateURL    https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/shanglv.js
 // @downloadURL  https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/shanglv.js
 // ==/UserScript==
+
+/*
+更新日志：
+v1.6 (2025-09-29)
+- 支持两字国籍代码填写
+*/
 
 /*
 更新日志：
@@ -60,6 +66,7 @@ v1.0 (2025-09-26)
   // 国家/地区映射 - 修改为中国大陆等中文名称
   const COUNTRY_MAP = {
     "CHN": "中国大陆",
+    "CN": "中国大陆",
     'HKG': "中国香港",
     "MAC": "中国澳门",
     "TWN": "中国台湾",
