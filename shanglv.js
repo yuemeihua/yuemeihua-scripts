@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         携程商旅乘机人自动填写 (SSR DOCS 解析)
 // @namespace    https://example.com/
-// @version      1.3
+// @version      1.4
 // @description  在携程商旅乘客页自动填写护照信息（SSR DOCS 格式解析；支持自动添加乘机人；支持性别/姓名/出生日期/国籍等自动填充）
 // @author       胡朗
 // @match        https://ct.ctrip.com/corp-flight-booking/*
@@ -10,6 +10,13 @@
 // @updateURL    https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/shanglv.js
 // @downloadURL  https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/shanglv.js
 // ==/UserScript==
+
+/*
+更新日志：
+v1.4 (2025-09-29)
+- 更新检测到护照填写才弹出控制台
+- 更改填写网络控制延迟保证填写稳定性和速度兼容
+*/
 
 /*
 更新日志：
@@ -636,14 +643,14 @@ async function setInputByPlaceholder(psgBoxId, placeholderText, value, ) {
       // 1. 填写姓（拼音）
     if (data.surname) {
       setInputByLabelText(cardEl, "姓（拼音）Surname", data.surname);
-      await waitForNetworkRequests(5000); // 等待网络请求，最多5秒
+      await waitForNetworkRequests(500); // 等待网络请求
      }
       await sleep(200);
 
       // 2. 填写名（拼音）
       if (data.givenName) {
       setInputByLabelText(cardEl, "名（拼音）Given name", data.givenName);
-      await waitForNetworkRequests(5000); // 等待网络请求，最多5秒
+      await waitForNetworkRequests(500); // 等待网络请求
      }
       await sleep(200);
 
@@ -664,8 +671,6 @@ if (data.gender) {
 
       for (let i = 1; i <= 5; i++) {
         simulateClick(radio);
-        await waitForNetworkRequests(5000); // 等待网络请求，最多5秒
-        await sleep(200 + i * i * 100); // 递增等待，给框架渲染时间
 
         // ✅ 检查 class 来确认是否真的选中
         const isSelected =
@@ -700,7 +705,7 @@ if (data.gender) {
       if (data.birthdate) {
         try {
           setInputByPlaceholder(cardId, "出生日期", data.birthdate);
-          await waitForNetworkRequests(5000); // 等待网络请求，最多5秒
+          await waitForNetworkRequests(500); // 等待网络请求
           logToConsole('已设置出生日期：', data.birthdate);
           } catch (e) {
         logToConsole('❌ 设置出生日期时出错：', e);
@@ -713,7 +718,7 @@ if (data.gender) {
       // 5. 选择国籍
       if (data.nationalityFull) {
           await setNationality(cardId, data.nationalityFull,0);
-          await waitForNetworkRequests(5000); // 等待网络请求，最多5秒
+          await waitForNetworkRequests(7000); // 等待网络请求，最多5秒
           logToConsole('已选择国籍：', data.nationalityFull);
 
       }
@@ -723,7 +728,6 @@ if (data.gender) {
       // 6. 填写证件号码
     if (data.passportNumber) {
       passwordLabelText(cardEl, "证件号码", data.passportNumber);
-      await waitForNetworkRequests(5000); // 等待网络请求，最多5秒
     }
       
     else {
@@ -731,13 +735,13 @@ if (data.gender) {
     }
 
 
-      await sleep(200);
+      await sleep(400);
 
       // 7. 设置证件有效期
       if (data.expirationDate) {
         try {
         setInputByPlaceholder(cardId, "证件有效期", data.expirationDate);
-        await waitForNetworkRequests(5000); // 等待网络请求，最多5秒
+        await waitForNetworkRequests(500); // 等待网络请求
         logToConsole('已设置证件有效期：', data.expirationDate);
         }catch (e) {
         logToConsole('❌ 设置证件有效期时出错：', e);
@@ -761,6 +765,7 @@ if (data.gender) {
         cardEl.querySelector('input[placeholder*="手机"]');
       if (phoneInput) {
         setInputValue(phoneInput, DEFAULT_PHONE);
+        await waitForNetworkRequests(500); // 等待网络请求
         logToConsole('已设置手机号：', DEFAULT_PHONE);
       }
 
@@ -769,6 +774,7 @@ if (data.gender) {
         document.querySelector('#flt-ui-pc-book-footer-tips-radio .checkboxCircle');
       if (checkbox && !checkbox.classList.contains('checked')) {
         simulateClick(checkbox);
+        await waitForNetworkRequests(500); // 等待网络请求
         logToConsole('已勾选同意条款');
       }
 
@@ -915,9 +921,29 @@ function injectPanel() {
       }
     });
   }
+//检测护照信息后再弹出控制面板
+  function waitForFirstPassengerCard() {
+  return new Promise((resolve) => {
+    // 如果已经有 edit_psg_box-0，直接返回
+    if (document.getElementById('edit_psg_box-0')) {
+      resolve();
+      return;
+    }
 
+    // 否则监听 DOM 变化
+    const observer = new MutationObserver(() => {
+      if (document.getElementById('edit_psg_box-0')) {
+        observer.disconnect();
+        resolve();
+      }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+}
   // 页面加载完成后初始化
-  function init() {
+ async function init() {
+    await waitForFirstPassengerCard();
     logToConsole('携程商旅自动填写脚本已加载');
     injectPanel();
   }

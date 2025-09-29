@@ -516,6 +516,38 @@ function injectPanel() {
     });
   }
 
+function waitForPassengerCard() {
+  return new Promise((resolve) => {
+    // 1. 页面已存在 passenger-card，直接返回
+    if (document.querySelector('.passenger-card__inner') || document.getElementById('edit_psg_box-0')) {
+      resolve();
+      return;
+    }
+
+    // 2. 否则监听 DOM
+    const observer = new MutationObserver(() => {
+      if (document.querySelector('.passenger-card__inner') || document.getElementById('edit_psg_box-0')) {
+        observer.disconnect();
+        resolve();
+      }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+}
+
+(async function () {
+  'use strict';
+
+  // ... 你现有的全部代码（函数等）
+
+  // 等待检测到乘机人卡片
+  logToConsole('脚本已加载，等待乘机人卡片...');
+  await waitForPassengerCard();
+  logToConsole('检测到乘机人卡片，注入控制台面板');
   injectPanel();
+
+})();
+
 })();
 
