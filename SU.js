@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SU官网自动填充护照信息
 // @namespace    https://example.com/
-// @version      1.0
+// @version      1.1
 // @description  在 Aeroflot 乘客页自动填写护照信息
 // @author       胡朗
 // @match        https://www.aeroflot.ru/sb/app/ru-en/*
@@ -11,6 +11,12 @@
 // @updateURL    https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/SU.js
 // @downloadURL  https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/SU.js
 // ==/UserScript==
+
+/*
+更新日志：
+v1.1 (2025-09-29)
+- 更新检测到护照填写才弹出控制台
+*/
 
 /*
 更新日志：
