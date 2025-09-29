@@ -246,6 +246,97 @@ SSR DOCS BI HK1 P/CHN/PE3303737/CHN/28NOV77/M/11FEB30/YANG/YONG/P3
     window[passportsDataVarName] = results;
     return results;
   }
+
+
+
+
+
+
+  // 监听网络请求的 Promise
+function waitForNetworkRequests(timeout = 5000) {
+  return new Promise((resolve) => {
+    let requestsPending = 0;
+    let resolved = false;
+
+    // 代理 XMLHttpRequest
+    const originalOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function () {
+      requestsPending++;
+      this.addEventListener('loadend', () => {
+        requestsPending--;
+        if (requestsPending === 0 && !resolved) {
+          resolved = true;
+          resolve();
+        }
+      });
+      return originalOpen.apply(this, arguments);
+    };
+
+    // 代理 fetch
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      requestsPending++;
+      const response = await originalFetch(...args);
+      requestsPending--;
+      if (requestsPending === 0 && !resolved) {
+        resolved = true;
+        resolve();
+      }
+      return response;
+    };
+
+    // 设置超时
+    setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        resolve();
+        logToConsole('网络请求等待超时，继续执行');
+      }
+    }, timeout);
+  });
+}
+
+
+
+
+
+
+//护照号输入
+async function passwordLabelText(psgBoId, InputText, value) {
+    // 查找对应的 label
+    const label = Array.from(psgBoId.querySelectorAll('label'))
+        .find(l => l.textContent.trim() === InputText);
+    if (label) {
+  // label 的前一个兄弟是 div.inputClass，里面有 input
+  const inputClass = label.previousElementSibling;
+  const input = inputClass ? inputClass.querySelector('input') : null;
+
+  if (input) {
+    // React/Vue 兼容设置值
+    function setNativeValue(element, value) {
+      const valueSetter = Object.getOwnPropertyDescriptor(element, 'value')?.set;
+      const prototype = Object.getPrototypeOf(element);
+      const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+
+      if (valueSetter && valueSetter !== prototypeValueSetter) {
+        prototypeValueSetter.call(element, value);
+      } else {
+        valueSetter.call(element, value);
+      }
+    }
+
+    setNativeValue(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+
+    console.log('✅ 已填写证件号码 ', value);
+  } else {
+    console.log("❌ 未找到 input");
+  }
+ }
+}
+
+
 //使用文本输入框
 async function setInputByLabelText(psgBoId, InputText, value) {
 	  const label = Array.from(psgBoId.querySelectorAll('label'))
@@ -260,36 +351,18 @@ async function setInputByLabelText(psgBoId, InputText, value) {
 	const passportNumberInput = inputArea ? inputArea.querySelector('input') : null;
 
 	  if (passportNumberInput) {
-		  let success = false;
-
-		for (let i = 1; i <= 5; i++) {
-			// 模拟点击激活
-			passportNumberInput.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-			passportNumberInput.focus();
-			await sleep(200 + i * i * 100);
-
 			// 设置值
 			setInputValue(passportNumberInput, value);
+      passportNumberInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      passportNumberInput.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
+      passportNumberInput.blur();
+      passportNumberInput.dispatchEvent(new Event("change", { bubbles: true }));
 
-			// 等待框架同步
-			await sleep(200 + i * i* 100);
-
-			if (passportNumberInput.value === value) {
-				logToConsole(`✅ 已设置${InputText}：${value}（第 ${i} 次成功）`);
-				success = true;
-				break;
-			} else {
-				console.warn(`第 ${i} 次尝试失败，当前值: "${passportNumberInput.value}"`);
-			}
-		}
-
-		if (!success) {
-			console.error(`❌ 超过 5 次仍未成功设置${InputText}：${value}`);
-		}
-	  } else {
-		logToConsole('❌ 未找到 '+ InputText +' 输入框');
-	  }
   }
+  else{
+    console.log(`❌ 未找到文本为“${InputText}”的输入框 in ${cardId}`);
+  }
+}
   // 检测当前SSR护照数量
   function detectPassengerCount() {
     const cards = document.querySelectorAll('[id^="edit_psg_box-"].editBox');
@@ -464,39 +537,18 @@ async function setInputByLabelText(psgBoId, InputText, value) {
             if (item.style.display === 'none') return;
             if (item.textContent.trim() === country) {
               item.click();
+              select.blur();
               console.log(`已选择国家: ${country}`);
               found = true;
             }
           });
-          if (!found) {
-            console.warn(`搜索后未找到国家: ${country}，尝试直接选择`);
-            directSelect(targetDropdown, country);
-          }
         }, 200); // 等待过滤
-      } else {
-        console.warn('未找到搜索输入框，尝试直接选择');
-        directSelect(targetDropdown, country);
       }
     })
     .catch(err => {
       console.error(err.message);
     });
 
-  // 5. 直接选择（备用方案）
-  function directSelect(dropdown, country) {
-    const items = dropdown.querySelectorAll('.index-module_country-item__ZQ3A1');
-    let found = false;
-    items.forEach(item => {
-      if (item.textContent.trim() === country) {
-        item.click();
-        console.log(`直接选择国家: ${country}`);
-        found = true;
-      }
-    });
-    if (!found) {
-      console.error(`未找到国家: ${country}`);
-    }
-  }
 }
 
   // 通过 placeholder 填写时间，带重试机制
@@ -644,15 +696,20 @@ if (data.gender) {
       if (data.nationalityFull) {
           await setNationality(cardId, data.nationalityFull,0);
           logToConsole('已选择国籍：', data.nationalityFull);
+          logToConsole('等待国籍选择后的网络请求完成...');.
+          await waitForNetworkRequests(5000); // 等待网络请求，最多5秒
+          logToConsole('国籍选择后的网络请求已完成，继续填写证件号码');
 
       }
 
-      await sleep(200);
+      await sleep(300);
 
       // 6. 填写证件号码
     if (data.passportNumber) {
-      setInputByLabelText(cardEl, "证件号码", data.passportNumber);
-  }
+      passwordLabelText(cardEl, "证件号码", data.passportNumber);}
+    else {
+      logToConsole('❌ 未提供证件号码，跳过填写');
+    }
 
 
       await sleep(200);
