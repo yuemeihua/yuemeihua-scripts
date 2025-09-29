@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         SU官网自动填充护照信息
 // @namespace    https://example.com/
-// @version      1.1
+// @version      1.2
 // @description  在 Aeroflot 乘客页自动填写护照信息
 // @author       胡朗
 // @match        https://www.aeroflot.ru/sb/app/ru-en/*
@@ -11,6 +11,12 @@
 // @updateURL    https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/SU.js
 // @downloadURL  https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/SU.js
 // ==/UserScript==
+
+/*
+更新日志：
+v1.2 (2025-09-29)
+- 删除测试护照
+*/
 
 /*
 更新日志：
@@ -33,10 +39,7 @@ v1.0 (2025-09-26)
   const DEFAULT_EMAIL = 'yuemeihuafly@163.com';
   const DEFAULT_PHONE = '18610429740';
   //固定测试护照信息
-  const defaultInput = `SSR DOCS BI HK1 P/CHN/E92082749/CHN/31JUL88/M/28DEC26/MA/CHAO/CHENAN/P1
-SSR DOCS BI HK1 P/CHN/EA2378561/CHN/07NOV76/M/15MAY27/ZHOU/CHENAN/P1
-SSR DOCS BI HK1 P/CHN/PE3303737/CHN/28NOV77/M/11FEB30/YANG/YONG/P2
-`;
+  const defaultInput = ``;
   //护照简写国家转国家数组
   const COUNTRY_MAP = { 'CHN': 'China', 'PRC': 'China', 'CN': 'China' };
 

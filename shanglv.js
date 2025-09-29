@@ -13,6 +13,12 @@
 
 /*
 更新日志：
+v1.5 (2025-09-29)
+- 删除测试护照
+*/
+
+/*
+更新日志：
 v1.4 (2025-09-29)
 - 更新检测到护照填写才弹出控制台
 - 更改填写网络控制延迟保证填写稳定性和速度兼容
@@ -49,10 +55,7 @@ v1.0 (2025-09-26)
   const passportsDataVarName = 'passportsData';
   window[passportsDataVarName] = [];
 
-  const defaultInput = `SSR DOCS BI HK1 P/CHN/E92082749/CHN/31JUL88/M/28DEC26/MA/CHAO/CHENAN/P1
-SSR DOCS BI HK1 P/CHN/EA2378561/CHN/07NOV76/M/15MAY27/ZHOU/CHENAN/P2
-SSR DOCS BI HK1 P/CHN/PE3303737/CHN/28NOV77/M/11FEB30/YANG/YONG/P3
-`;
+  const defaultInput = ``;
 
   // 国家/地区映射 - 修改为中国大陆等中文名称
   const COUNTRY_MAP = {
