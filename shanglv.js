@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         携程商旅乘机人自动填写 (SSR DOCS 解析)
 // @namespace    https://example.com/
-// @version      1.6
+// @version      1.7
 // @description  在携程商旅乘客页自动填写护照信息（SSR DOCS 格式解析；支持自动添加乘机人；支持性别/姓名/出生日期/国籍等自动填充）
 // @author       胡朗
 // @match        https://ct.ctrip.com/corp-flight-booking/*
@@ -10,6 +10,12 @@
 // @updateURL    https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/shanglv.js
 // @downloadURL  https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/shanglv.js
 // ==/UserScript==
+
+/*
+更新日志：
+v1.7 (2025-10-09)
+- 更改插件位置 避免遮挡携程官网价格
+*/
 
 /*
 更新日志：
@@ -822,7 +828,7 @@ function injectPanel() {
     const panel = document.createElement('div');
     panel.id = 'ctrip-panel';
     panel.style.cssText = `
-      position: fixed; right: 12px; top: 80px; width: 460px; z-index: 999999;
+      position: fixed; right: 12px; top: 50%; transform: translateY(-50%); width: 460px; z-index: 999999;
       background: white; border: 1px solid #ccc; box-shadow: 0 6px 18px rgba(0,0,0,.12);
       border-radius: 8px; font-family: Arial, sans-serif; font-size: 13px;
     `;
