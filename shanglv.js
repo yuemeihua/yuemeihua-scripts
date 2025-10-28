@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         携程商旅乘机人自动填写 (SSR DOCS 解析)
 // @namespace    https://example.com/
-// @version      1.7
+// @version      1.8
 // @description  在携程商旅乘客页自动填写护照信息（SSR DOCS 格式解析；支持自动添加乘机人；支持性别/姓名/出生日期/国籍等自动填充）
 // @author       胡朗
 // @match        https://ct.ctrip.com/corp-flight-booking/*
