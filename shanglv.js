@@ -13,6 +13,12 @@
 
 /*
 更新日志：
+v1.9 (2025-11-25)
+- 优化填写逻辑，增加复核机制
+*/
+
+/*
+更新日志：
 v1.8 (2025-10-28)
 - 增加国家BGD孟加拉国映射
 */
@@ -199,6 +205,160 @@ v1.0 (2025-09-26)
     } catch (e) { console.error(e); }
   }
 
+  function normalizeCompareValue(val) {
+    return (val || '').trim().toUpperCase();
+  }
+
+  function defaultValueMatcher(actual, expected) {
+    return normalizeCompareValue(actual) === normalizeCompareValue(expected);
+  }
+
+  async function ensureInputValue(
+    input,
+    value,
+    label = '字段',
+    { retries = 3, matcher = defaultValueMatcher, wait = 60 } = {}
+  ) {
+    if (!input) {
+      logToConsole(`❌ 未找到${label}输入框`);
+      return false;
+    }
+    for (let i = 1; i <= retries; i++) {
+      setInputValue(input, value);
+      await sleep(wait);
+      if (matcher(input.value, value)) {
+        logToConsole(`✅ ${label}已填写：${value}`);
+        return true;
+      }
+      logToConsole(`⚠️ ${label}第 ${i} 次校验失败，重试`);
+      await sleep(wait + 40);
+    }
+    logToConsole(`❌ ${label}多次填写失败，请手动检查`);
+    return false;
+  }
+
+  async function ensureSelectValue(select, value, label = '下拉框', retries = 3) {
+    if (!select) {
+      logToConsole(`❌ 未找到${label}`);
+      return false;
+    }
+    for (let i = 1; i <= retries; i++) {
+      select.value = value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(60);
+      if (defaultValueMatcher(select.value, value)) {
+        logToConsole(`✅ ${label}已选择：${value}`);
+        return true;
+      }
+      logToConsole(`⚠️ ${label}第 ${i} 次选择失败，重试`);
+    }
+    logToConsole(`❌ ${label}无法设置为 ${value}`);
+    return false;
+  }
+
+  async function ensureGenderSelection(cardEl, gender) {
+    if (!gender) return false;
+    const target = gender === 'M' ? '男' : '女';
+    const genderContainer = cardEl.querySelector('.edit_radio_wrapper');
+    if (!genderContainer) {
+      logToConsole('❌ 未找到性别容器');
+      return false;
+    }
+    const genderOptions = genderContainer.querySelectorAll('.radioContainer');
+    const genderOption = Array.from(genderOptions).find(opt =>
+      (opt.textContent || '').trim() === target
+    );
+    if (!genderOption) {
+      logToConsole(`❌ 未找到性别选项：${target}`);
+      return false;
+    }
+    const radio = genderOption.querySelector('.g-radio') || genderOption;
+    for (let i = 1; i <= 3; i++) {
+      simulateClick(radio);
+      await sleep(40);
+      const isSelected =
+        genderOption.classList.contains('selected') ||
+        radio.classList.contains('g-radio-checked') ||
+        !!genderOption.querySelector('.g-radio-checked');
+      if (isSelected) {
+        logToConsole(`✅ 已选择性别：${target}`);
+        return true;
+      }
+      logToConsole(`⚠️ 性别第 ${i} 次选择未生效，重试`);
+    }
+    logToConsole(`❌ 性别选择失败：${target}`);
+    return false;
+  }
+
+  function normalizeLabelTextForCompare(text) {
+    return (text || '')
+      .replace(/[（﹙]/g, '(')
+      .replace(/[）﹚]/g, ')')
+      .replace(/\s+/g, '')
+      .toUpperCase();
+  }
+
+  function getInputByLabel(container, labelText) {
+    if (!container || !labelText) return null;
+    const root = typeof container === 'string' ? document.getElementById(container) : container;
+    if (!root) return null;
+
+    const normalizedTarget = normalizeLabelTextForCompare(labelText);
+    if (!normalizedTarget) return null;
+
+    const labelCandidates = Array.from(
+      root.querySelectorAll(
+        'label, .label, .label-text, .input-label, .formLabel, .inputArea label, [data-label], [aria-label]'
+      )
+    );
+
+    const findMatchingLabel = () => {
+      for (const candidate of labelCandidates) {
+        const textContent = candidate.getAttribute('data-label') ||
+          candidate.getAttribute('aria-label') ||
+          candidate.textContent ||
+          '';
+        const normalizedCandidate = normalizeLabelTextForCompare(textContent);
+        if (!normalizedCandidate) continue;
+        if (
+          normalizedCandidate === normalizedTarget ||
+          normalizedCandidate.includes(normalizedTarget) ||
+          normalizedTarget.includes(normalizedCandidate)
+        ) {
+          return candidate;
+        }
+      }
+      return null;
+    };
+
+    const label = findMatchingLabel();
+    if (!label) return null;
+
+    const possibleInputs = [
+      label.control,
+      label.querySelector && label.querySelector('input'),
+      label.closest && label.closest('.inputArea, .input-area, .inputWrapper, .input-wrapper'),
+      label.parentElement,
+      label.previousElementSibling,
+      label.nextElementSibling
+    ]
+      .filter(Boolean)
+      .flatMap(el => {
+        if (!el) return [];
+        if (el instanceof HTMLInputElement) return [el];
+        return Array.from(el.querySelectorAll ? el.querySelectorAll('input') : []);
+      });
+
+    if (possibleInputs.length > 0) {
+      return possibleInputs[0];
+    }
+
+    return Array.from(root.querySelectorAll('input')).find(input => {
+      const placeholder = normalizeLabelTextForCompare(input.getAttribute('placeholder'));
+      return placeholder && placeholder.includes(normalizedTarget);
+    }) || null;
+  }
+
   // 日期格式转换：31JUL88 -> 1988-07-31
   function normalizeDateFlexible(s) {
     if (!s) return '';
@@ -345,68 +505,26 @@ function waitForNetworkRequests(timeout = 5000) {
 
 
 
-//护照号输入
-async function passwordLabelText(psgBoId, InputText, value) {
-    // 查找对应的 label
-    const label = Array.from(psgBoId.querySelectorAll('label'))
-        .find(l => l.textContent.trim() === InputText);
-    if (label) {
-  // label 的前一个兄弟是 div.inputClass，里面有 input
-  const inputClass = label.previousElementSibling;
-  const input = inputClass ? inputClass.querySelector('input') : null;
-
-  if (input) {
-    // React/Vue 兼容设置值
-    function setNativeValue(element, value) {
-      const valueSetter = Object.getOwnPropertyDescriptor(element, 'value')?.set;
-      const prototype = Object.getPrototypeOf(element);
-      const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-
-      if (valueSetter && valueSetter !== prototypeValueSetter) {
-        prototypeValueSetter.call(element, value);
-      } else {
-        valueSetter.call(element, value);
-      }
+  //护照号输入
+  async function passwordLabelText(psgBoId, InputText, value) {
+    const input = getInputByLabel(psgBoId, InputText);
+    if (!input) {
+      logToConsole(`❌ 未找到${InputText}输入框`);
+      return false;
     }
-
-    setNativeValue(input, value);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-
-    console.log('✅ 已填写证件号码 ', value);
-  } else {
-    console.log("❌ 未找到 input");
+    return ensureInputValue(input, value, InputText, { retries: 4 });
   }
- }
-}
 
 
-//使用文本输入框
-async function setInputByLabelText(psgBoId, InputText, value) {
-	  const label = Array.from(psgBoId.querySelectorAll('label'))
-		  .find(l => l.textContent.trim() === InputText);
-
-	  if (!label) {
-		  console.log(`❌ 未找到文本为“${InputText}”的 label in ${cardId}`);
-		  return;
-	  }
-
-	const inputArea = label.closest('.inputArea');
-	const passportNumberInput = inputArea ? inputArea.querySelector('input') : null;
-
-	  if (passportNumberInput) {
-			// 设置值
-			setInputValue(passportNumberInput, value);
-      passportNumberInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-      passportNumberInput.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
-      passportNumberInput.blur();
-      passportNumberInput.dispatchEvent(new Event("change", { bubbles: true }));
-
+  //使用文本输入框
+  async function setInputByLabelText(psgBoId, InputText, value) {
+    const input = getInputByLabel(psgBoId, InputText);
+    if (!input) {
+      logToConsole(`❌ 未找到文本为“${InputText}”的输入框`);
+      return false;
+    }
+    return ensureInputValue(input, value, InputText);
   }
-  else{
-    console.log(`❌ 未找到文本为“${InputText}”的输入框 in ${cardId}`);
-  }
-}
   // 检测当前SSR护照数量
   function detectPassengerCount() {
     const cards = document.querySelectorAll('[id^="edit_psg_box-"].editBox');
@@ -596,59 +714,36 @@ async function setInputByLabelText(psgBoId, InputText, value) {
 }
 
   // 通过 placeholder 填写时间，带重试机制
-async function setInputByPlaceholder(psgBoxId, placeholderText, value, ) {
-  const container = document.getElementById(psgBoxId);
-  if (!container) {
-    console.error("未找到容器:", psgBoxId);
-    return false;
-  }
+  async function setInputByPlaceholder(psgBoxId, placeholderText, value) {
+    const container = document.getElementById(psgBoxId);
+    if (!container) {
+      logToConsole(`❌ 未找到容器: ${psgBoxId}`);
+      return false;
+    }
 
-  const input = container.querySelector(`input[placeholder="${placeholderText}"]`);
-  if (!input) {
-    console.error(`未找到 placeholder 为“${placeholderText}”的输入框`);
-    return false;
-  }
+    const input = container.querySelector(`input[placeholder="${placeholderText}"]`);
+    if (!input) {
+      logToConsole(`❌ 未找到 placeholder 为“${placeholderText}”的输入框`);
+      return false;
+    }
 
-  const nativeSetter = Object.getOwnPropertyDescriptor(
-    window.HTMLInputElement.prototype,
-    "value"
-  ).set;
+    const success = await ensureInputValue(input, value, placeholderText, { retries: 5 });
 
-  for (let i = 1; i <= 5; i++) {
-    // 设置值
-    await sleep(200 + i * 100);
-    nativeSetter.call(input, value);
-
-    // 触发事件
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-
-    // 给点时间让框架响应
-   await sleep(200 + i * 100);
-
-    // 检查是否设置成功
-    if (input.value === value) {
-      console.log(`✅ 成功设置 ${placeholderText}，尝试次数: ${i}`);
-
-      // 模拟回车（可选）
+    if (success) {
       input.dispatchEvent(
-        new KeyboardEvent("keydown", {
+        new KeyboardEvent('keydown', {
           bubbles: true,
           cancelable: true,
-          key: "Enter",
-          code: "Enter",
+          key: 'Enter',
+          code: 'Enter',
           keyCode: 13
         })
       );
-      return true;
-    } else {
-      console.warn(`第 ${i} 次尝试失败，当前值: ${input.value}`);
+      input.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: 'Enter', code: 'Enter', keyCode: 13 }));
     }
-  }
 
-  console.error(`❌ 超过 ${maxRetry} 次仍未成功设置 ${placeholderText}，跳过`);
-  return false;
-}
+    return success;
+  }
 
   // 填写单个乘机人信息
   async function fillPassengerCard(cardIndex, data) {
@@ -664,75 +759,35 @@ async function setInputByPlaceholder(psgBoxId, placeholderText, value, ) {
 
     try {
       // 1. 填写姓（拼音）
-    if (data.surname) {
-      setInputByLabelText(cardEl, "姓（拼音）Surname", data.surname);
-      await waitForNetworkRequests(500); // 等待网络请求
-     }
+      if (data.surname) {
+        await setInputByLabelText(cardEl, '姓（拼音）Surname', data.surname);
+        await waitForNetworkRequests(500); // 等待网络请求
+      }
       await sleep(200);
 
       // 2. 填写名（拼音）
       if (data.givenName) {
-      setInputByLabelText(cardEl, "名（拼音）Given name", data.givenName);
-      await waitForNetworkRequests(500); // 等待网络请求
-     }
+        await setInputByLabelText(cardEl, '名（拼音）Given name', data.givenName);
+        await waitForNetworkRequests(500); // 等待网络请求
+      }
       await sleep(200);
 
       // 3. 选择性别
-if (data.gender) {
-  const genderContainer = cardEl.querySelector('.edit_radio_wrapper');
-  if (genderContainer) {
-    const genderOptions = genderContainer.querySelectorAll('.radioContainer');
-    const targetGender = data.gender === 'M' ? '男' : '女';
-
-    const genderOption = Array.from(genderOptions).find(opt =>
-      opt.textContent.trim() === targetGender
-    );
-
-    if (genderOption) {
-      const radio = genderOption.querySelector('.g-radio');
-      let success = false;
-
-      for (let i = 1; i <= 5; i++) {
-        simulateClick(radio);
-
-        // ✅ 检查 class 来确认是否真的选中
-        const isSelected =
-          genderOption.classList.contains("selected") ||
-          radio.classList.contains("g-radio-checked") ||
-          genderOption.querySelector(".g-radio-checked");
-
-        if (isSelected) {
-          logToConsole(`✅ 已选择性别：${targetGender}（第 ${i} 次成功）`);
-          success = true;
-          break;
-        } else {
-          console.warn(`第 ${i} 次尝试失败，性别未选中`);
-        }
+      if (data.gender) {
+        await ensureGenderSelection(cardEl, data.gender);
       }
-
-      if (!success) {
-        console.error(`❌ 超过 5 次仍未成功设置性别：${targetGender}`);
-      }
-    } else {
-      logToConsole(`❌ 未找到性别选项：${targetGender}`);
-    }
-  }
-}
-
-
-
 
       await sleep(200);
 
       // 4. 设置出生日期
       if (data.birthdate) {
         try {
-          setInputByPlaceholder(cardId, "出生日期", data.birthdate);
+          await setInputByPlaceholder(cardId, '出生日期', data.birthdate);
           await waitForNetworkRequests(500); // 等待网络请求
           logToConsole('已设置出生日期：', data.birthdate);
-          } catch (e) {
-        logToConsole('❌ 设置出生日期时出错：', e);
-      }
+        } catch (e) {
+          logToConsole('❌ 设置出生日期时出错：', e);
+        }
       }
 
 
@@ -740,22 +795,19 @@ if (data.gender) {
 
       // 5. 选择国籍
       if (data.nationalityFull) {
-          await setNationality(cardId, data.nationalityFull,0);
-          await waitForNetworkRequests(7000); // 等待网络请求，最多5秒
-          logToConsole('已选择国籍：', data.nationalityFull);
-
+        await setNationality(cardId, data.nationalityFull, 0);
+        await waitForNetworkRequests(800); // 等待网络请求，最多5秒
+        logToConsole('已选择国籍：', data.nationalityFull);
       }
 
       await sleep(300);
 
       // 6. 填写证件号码
-    if (data.passportNumber) {
-      passwordLabelText(cardEl, "证件号码", data.passportNumber);
-    }
-      
-    else {
-      logToConsole('❌ 未提供证件号码，跳过填写');
-    }
+      if (data.passportNumber) {
+        await passwordLabelText(cardEl, '证件号码', data.passportNumber);
+      } else {
+        logToConsole('❌ 未提供证件号码，跳过填写');
+      }
 
 
       await sleep(400);
@@ -763,22 +815,21 @@ if (data.gender) {
       // 7. 设置证件有效期
       if (data.expirationDate) {
         try {
-        setInputByPlaceholder(cardId, "证件有效期", data.expirationDate);
-        await waitForNetworkRequests(500); // 等待网络请求
-        logToConsole('已设置证件有效期：', data.expirationDate);
-        }catch (e) {
-        logToConsole('❌ 设置证件有效期时出错：', e);
-      }
-
+          await setInputByPlaceholder(cardId, '证件有效期', data.expirationDate);
+          await waitForNetworkRequests(500); // 等待网络请求
+          logToConsole('已设置证件有效期：', data.expirationDate);
+        } catch (e) {
+          logToConsole('❌ 设置证件有效期时出错：', e);
+        }
       }
 
       await sleep(200);
 
       // 8. 选择证件签署国
       if (data.issuingCountryFull) {
-          await setNationality(cardId, data.issuingCountryFull,1);
-          await waitForNetworkRequests(5000); // 等待网络请求，最多5秒
-          logToConsole('已选择证件签署国：', data.issuingCountryFull);
+        await setNationality(cardId, data.issuingCountryFull, 1);
+        await waitForNetworkRequests(800); // 等待网络请求，最多5秒
+        logToConsole('已选择证件签署国：', data.issuingCountryFull);
       }
 
       await sleep(200);
@@ -787,7 +838,7 @@ if (data.gender) {
       const phoneInput = cardEl.querySelector('.input-area input') ||
         cardEl.querySelector('input[placeholder*="手机"]');
       if (phoneInput) {
-        setInputValue(phoneInput, DEFAULT_PHONE);
+        await ensureInputValue(phoneInput, DEFAULT_PHONE, '手机号');
         await waitForNetworkRequests(500); // 等待网络请求
         logToConsole('已设置手机号：', DEFAULT_PHONE);
       }
