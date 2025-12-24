@@ -553,13 +553,23 @@ v2.1 (2025-12-24)
     }
   }
 
-  // 新的容器识别函数 - 通过文本"Adult X"识别
+  // 新的容器识别函数 - 通过文本"Adult"或"Adult X"识别
   function getAdultContainers() {
-    const adults = Array.from(document.querySelectorAll('p'))
-      .filter(p => /^Adult\s+\d+$/.test(p.innerText));
+    // 首先尝试查找多个乘客的情况："Adult X"
+    let adults = Array.from(document.querySelectorAll('p'))
+      .filter(p => /^Adult\s+\d+$/i.test(p.innerText.trim()));
+
+    // 如果没有找到，尝试查找单个乘客的情况："Adult"
+    if (adults.length === 0) {
+      adults = Array.from(document.querySelectorAll('p'))
+        .filter(p => /^Adult$/i.test(p.innerText.trim()));
+    }
 
     const clickContainers = adults.map(p =>
-      p.closest('div[tabindex="0"]')
+      p.closest('div[tabindex="0"]') ||
+      p.closest('[role="button"]') ||
+      p.closest('button') ||
+      p.closest('.sc-gsFSjX')
     );
     
     return clickContainers.filter(container => container !== null);
@@ -1038,23 +1048,26 @@ v2.1 (2025-12-24)
 
   function waitForPassengerCard() {
     return new Promise((resolve) => {
-      // 1. 页面已存在Adult容器，直接返回
-      const containers = getAdultContainers();
-      if (containers.length > 0) {
-        resolve();
-        return;
-      }
-
-      // 2. 否则监听 DOM
-      const observer = new MutationObserver(() => {
+      // 等待页面完全加载
+      let attempts = 0;
+      const maxAttempts = 20; // 最多尝试20次，每次间隔500ms，总共10秒
+      
+      const checkForCards = () => {
+        attempts++;
         const containers = getAdultContainers();
-        if (containers.length > 0) {
-          observer.disconnect();
+        
+        // 无论是否找到容器，都继续执行，因为可能页面结构不同
+        if (attempts >= maxAttempts) {
           resolve();
+          return;
         }
-      });
-
-      observer.observe(document.body, { childList: true, subtree: true });
+        
+        // 继续等待
+        setTimeout(checkForCards, 500);
+      };
+      
+      // 开始检查
+      setTimeout(checkForCards, 1000); // 初始等待1秒
     });
   }
 
@@ -1064,7 +1077,10 @@ v2.1 (2025-12-24)
     // 等待检测到乘机人卡片
     logToConsole('脚本已加载，等待乘机人卡片...');
     await waitForPassengerCard();
-    logToConsole('检测到乘机人卡片，注入控制台面板');
+    
+    // 无论是否检测到乘客卡片，都注入控制面板
+    // 这样即使只有一个乘客或页面结构不同，也能正常工作
+    logToConsole('注入控制台面板');
     injectPanel();
 
   })();
