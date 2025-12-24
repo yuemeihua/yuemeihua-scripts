@@ -1050,7 +1050,7 @@ v2.1 (2025-12-24)
     return new Promise((resolve) => {
       // 等待页面完全加载
       let attempts = 0;
-      const maxAttempts = 20; // 最多尝试20次，每次间隔500ms，总共10秒
+      const maxAttempts = 2; // 最多尝试20次，每次间隔500ms，总共10秒
       
       const checkForCards = () => {
         attempts++;
@@ -1063,11 +1063,11 @@ v2.1 (2025-12-24)
         }
         
         // 继续等待
-        setTimeout(checkForCards, 500);
+        setTimeout(checkForCards, 100);
       };
       
       // 开始检查
-      setTimeout(checkForCards, 1000); // 初始等待1秒
+      setTimeout(checkForCards, 100); // 初始等待1秒
     });
   }
 
