@@ -4,9 +4,10 @@
 // @version      2.1
 // @description  Aeroflot 乘客页自动填写护照信 - 悦美华
 // @author       胡朗 / Revised
-// @match        https://www.aeroflot.ru/ru-en/sb/passengers/*
+// @match        https://www.aeroflot.ru/*/sb/passengers/*
+// @match        https://www.aeroflot.ru/ru-en*
 // @grant        none
-// @run-at       document-idle
+// @run-at       document-end
 // @updateURL    https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/SU_new.js
 // @downloadURL  https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/SU_new.js
 // ==/UserScript==
@@ -419,22 +420,22 @@ v2.1 (2025-12-24)
         if (m) { out.passengerIndex=parseInt(m[1],10); rest.splice(i,1); break; }
       }
       if (rest.length>=2) { out.surname=rest[0]; out.givenName=rest.slice(1).join(' '); }
-      
+
       // 使用合并后的COUNTRY_CODES字典，支持二字码和三字码的正向和反向匹配
       let issuingCountryData = COUNTRY_CODES[out.issuingCountry] || COUNTRY_CODES[out.issuingCountry.toUpperCase()];
       let nationalityData = COUNTRY_CODES[out.nationality] || COUNTRY_CODES[out.nationality.toUpperCase()];
-      
+
       // 如果直接匹配失败，尝试通过二字码反向查找
       if (!issuingCountryData && out.issuingCountry && out.issuingCountry.length === 2) {
         const upperCode = out.issuingCountry.toUpperCase();
         issuingCountryData = Object.values(COUNTRY_CODES).find(country => country.two_letter === upperCode);
       }
-      
+
       if (!nationalityData && out.nationality && out.nationality.length === 2) {
         const upperCode = out.nationality.toUpperCase();
         nationalityData = Object.values(COUNTRY_CODES).find(country => country.two_letter === upperCode);
       }
-      
+
       out.issuingIso2 = issuingCountryData?.two_letter || (out.issuingCountry && out.issuingCountry.length === 2 ? out.issuingCountry : null);
       out.nationalityIso2 = nationalityData?.two_letter || (out.nationality && out.nationality.length === 2 ? out.nationality : null);
       out.issuingCountryFull = issuingCountryData?.country_name || out.issuingCountry;
@@ -465,28 +466,28 @@ v2.1 (2025-12-24)
       // 找到Document type标签
       const label = Array.from(document.querySelectorAll('label'))
           .find(l => l.textContent.includes('Document type'));
-      
+
       if (!label) {
         return false;
       }
-      
+
       // 点击其父容器（通常是可点击的区域）
       const clickable = label.closest('.sc-ggpkNl') ||
                         label.closest('.sc-hIUIyC') ||
                         label.parentElement;
-      
+
       if (clickable) {
         clickable.click();
       }
-      
+
       // 等待并选择Other document
       await new Promise(resolve => setTimeout(resolve, 400));
-      
+
       const items = Array.from(document.querySelectorAll('.dropdown-item'));
       const target = items.find(item =>
           item.textContent.includes('Other document')
       );
-      
+
       if (target) {
         target.click();
         return true;
@@ -504,44 +505,44 @@ v2.1 (2025-12-24)
       // 1. 打开下拉框
       const codeInput = Array.from(document.querySelectorAll('input[readonly]'))
           .find(input => !input.value.includes('passport'));
-      
+
       if (!codeInput) {
         return false;
       }
-      
+
       const container = codeInput.closest('.sc-ggpkNl') || codeInput.parentElement;
       container.click();
-      
+
       await new Promise(resolve => setTimeout(resolve, 500));
-      
+
       const searchBox = document.querySelector('input[placeholder="Country or country code"]');
-      
+
       if (!searchBox) {
         return false;
       }
-      
+
       // 强制设置值并触发React事件
       const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
           window.HTMLInputElement.prototype,
           'value'
       ).set;
-      
+
       nativeInputValueSetter.call(searchBox, '86');
-      
+
       // 触发React的change事件
       const event = new Event('input', { bubbles: true });
       searchBox.dispatchEvent(event);
-      
+
       // 等待更长时间
       await new Promise(resolve => setTimeout(resolve, 1500));
-      
+
       const items = Array.from(document.querySelectorAll('.dropdown-item'));
-      
+
       const china = items.find(item =>
           item.textContent.includes('+86') ||
           item.textContent.includes('China')
       );
-      
+
       if (china) {
         china.click();
         return true;
@@ -553,24 +554,24 @@ v2.1 (2025-12-24)
     }
   }
 
-  // 简化的容器识别函数 - 不再依赖Adult文本检测
+  // 容器识别函数 - 通过文本"Adult"或"Adult X"识别
   function getAdultContainers() {
-    // 尝试查找所有可能的乘客容器
-    const containers = Array.from(document.querySelectorAll('div[tabindex="0"], [role="button"], button, .sc-gsFSjX'));
-    
-    return containers.filter(container => {
-      // 过滤掉明显不是乘客容器的元素
-      if (!container || container.offsetParent === null) return false;
-      
-      // 检查容器是否可见
-      const style = window.getComputedStyle(container);
-      if (style.display === 'none' || style.visibility === 'hidden') return false;
-      
-      // 检查容器是否有有效的尺寸
-      if (container.offsetWidth <= 0 || container.offsetHeight <= 0) return false;
-      
-      return true;
-    });
+    // 首先尝试查找多个乘客的情况："Adult X"
+    let adults = Array.from(document.querySelectorAll('p'))
+      .filter(p => /^Adult\s+\d+$/i.test(p.innerText.trim()));
+
+    // 如果没有找到，尝试查找单个乘客的情况："Adult"
+    if (adults.length === 0) {
+      adults = Array.from(document.querySelectorAll('p'))
+        .filter(p => /^Adult$/i.test(p.innerText.trim()));
+    }
+
+    const clickContainers = adults.map(p =>
+      p.closest('div[tabindex="0"]')
+    );
+
+    console.log(clickContainers);
+    return clickContainers.filter(container => container !== null);
   }
 
   // 新的护照信息填写函数 - 适应新的UI结构
@@ -579,7 +580,7 @@ v2.1 (2025-12-24)
     // 点击容器打开填写页面
     simulateClick(container);
     await sleep(1000);
-    
+
     try {
       // 姓
       const lastNameLabel = Array.from(document.querySelectorAll('label')).find(
@@ -653,13 +654,13 @@ v2.1 (2025-12-24)
       const genderButtons = Array.from(document.querySelectorAll('button')).filter(
         button => button.textContent.includes('Male') || button.textContent.includes('Female')
       );
-      
+
       if (genderButtons.length > 0 && data.gender) {
         const targetGender = data.gender === 'M' ? 'Male' : 'Female';
         const genderButton = genderButtons.find(
           button => button.textContent.includes(targetGender)
         );
-        
+
         if (genderButton) {
           simulateClick(genderButton);
           logToConsole('已设置性别为', data.gender);
@@ -685,7 +686,7 @@ v2.1 (2025-12-24)
       const passportLabel = Array.from(document.querySelectorAll('label')).find(
         label => label.textContent.includes('Document number')
       );
-      
+
       let passportInput = null;
       if (passportLabel) {
         // 尝试多种方式找到输入框
@@ -693,7 +694,7 @@ v2.1 (2025-12-24)
                        passportLabel.nextElementSibling?.querySelector('input') ||
                        passportLabel.closest('div').querySelector('input');
       }
-      
+
       // 如果还是找不到，尝试通过maxlength查找
       if (!passportInput) {
         const allInputs = Array.from(document.querySelectorAll('input'));
@@ -703,7 +704,7 @@ v2.1 (2025-12-24)
           !input.value
         );
       }
-      
+
       if (passportInput && data.passportNumber) {
         setInputValue(passportInput, data.passportNumber);
         logToConsole('已设置护照号:', data.passportNumber);
@@ -737,19 +738,19 @@ v2.1 (2025-12-24)
       const citizenshipLabel = Array.from(document.querySelectorAll('label')).find(
         label => label.textContent.includes('Citizenship')
       );
-      
+
       let citizenshipInput = null;
       if (citizenshipLabel) {
         citizenshipInput = citizenshipLabel.parentElement.querySelector('input') ||
                            citizenshipLabel.nextElementSibling?.querySelector('input') ||
                            citizenshipLabel.closest('div').querySelector('input');
       }
-      
+
       if (citizenshipInput && data.nationalityFull) {
         // 点击输入框打开下拉
         simulateClick(citizenshipInput);
         await sleep(500);
-        
+
         // 输入国籍名称（或 ISO 码）以触发下拉过滤
         const searchInput = findCountrySearchInput();
         if (searchInput) {
@@ -761,7 +762,7 @@ v2.1 (2025-12-24)
           // 查找并点击匹配的选项（更健壮的匹配规则）
           const options = Array.from(document.querySelectorAll('.dropdown-item'));
           const targetOption = findDropdownOptionByCandidates(options, candidates);
-          
+
           if (targetOption) {
             simulateClick(targetOption);
             logToConsole('已选择国籍:', data.nationalityFull);
@@ -781,19 +782,19 @@ v2.1 (2025-12-24)
       const issuingLabel = Array.from(document.querySelectorAll('label')).find(
         label => label.textContent.includes('Country of issue')
       );
-      
+
       let issuingInput = null;
       if (issuingLabel) {
         issuingInput = issuingLabel.parentElement.querySelector('input') ||
                        issuingLabel.nextElementSibling?.querySelector('input') ||
                        issuingLabel.closest('div').querySelector('input');
       }
-      
+
       if (issuingInput && data.issuingCountryFull) {
         // 点击输入框打开下拉
         simulateClick(issuingInput);
         await sleep(500);
-        
+
         // 输入签发国名称（或 ISO 码）以触发下拉过滤
         const searchInput = findCountrySearchInput();
         if (searchInput) {
@@ -826,7 +827,7 @@ v2.1 (2025-12-24)
           return svg && svg.getAttribute('d') && svg.getAttribute('d').includes('M6.273 6.263c-.66.66-.566.754');
         }
       );
-      
+
       if (closeButton) {
         simulateClick(closeButton);
         await sleep(500);
@@ -835,7 +836,7 @@ v2.1 (2025-12-24)
         const continueButton = Array.from(document.querySelectorAll('button')).find(
           button => button.textContent.includes('Continue')
         );
-        
+
         if (continueButton) {
           simulateClick(continueButton);
           await sleep(500);
@@ -844,14 +845,14 @@ v2.1 (2025-12-24)
     } catch (e) {
       logToConsole('点击关闭/Continue按钮时异常', e);
     }
-    
+
     logToConsole(`第 ${index+1} 位填写完成`);
   }
 
   // 新的联系信息填写函数 - 适应新的UI结构
   async function fillContactInfoNew() {
     logToConsole('开始填写联系信息');
-    
+
     try {
       // 邮箱
       const emailLabel = Array.from(document.querySelectorAll('label')).find(
@@ -894,7 +895,7 @@ v2.1 (2025-12-24)
       const termsLabel = Array.from(document.querySelectorAll('label')).find(
         label => label.textContent.includes('terms and conditions')
       );
-      
+
       if (termsLabel) {
         const checkbox = termsLabel.querySelector('input[type="checkbox"]');
         if (checkbox && !checkbox.checked) {
@@ -908,14 +909,14 @@ v2.1 (2025-12-24)
     } catch (e) {
       logToConsole('勾选条款时异常', e);
     }
-    
+
     logToConsole('联系信息填写完成');
   }
 
   // 新的填写所有乘客函数
   async function fillAllPassengersNew() {
     logToConsole('开始执行fillAllPassengersNew函数');
-    
+
     const containers = getAdultContainers();
     const passports = window[passportsDataVarName] || [];
 
@@ -934,7 +935,7 @@ v2.1 (2025-12-24)
       }
       logToConsole('所有护照信息填写完成');
     }
-    
+
     // 填写联系信息
     logToConsole('开始填写联系信息');
     await fillContactInfoNew();
@@ -942,6 +943,18 @@ v2.1 (2025-12-24)
   }
 
   function injectPanel() {
+    // 检查是否存在容器，如果没有则不显示面板
+    const containers = getAdultContainers();
+    if (containers.length === 0) {
+      // 如果面板已存在，则关闭它
+      const existingPanel = document.getElementById('aerofill-panel');
+      if (existingPanel) {
+        existingPanel.remove();
+        logToConsole('未检测到容器，已关闭面板');
+      }
+      return;
+    }
+
     if (document.getElementById('aerofill-panel')) return;
     const panel = document.createElement('div');
     panel.id = 'aerofill-panel';
@@ -1010,14 +1023,14 @@ v2.1 (2025-12-24)
         );
       });
     });
-    
+
     document.getElementById('aerofill-detect').addEventListener('click',()=>{
       const containers=getAdultContainers();
       logToConsole('检测到Adult容器数量：',containers.length);
     });
-    
+
     document.getElementById('aerofill-fill-all').addEventListener('click',fillAllPassengersNew);
-    
+
     document.getElementById('aerofill-fill-first').addEventListener('click',async()=>{
       const txt=document.getElementById('aerofill-input').value;
       const arr=parsePassportsFromText(txt);
@@ -1026,7 +1039,7 @@ v2.1 (2025-12-24)
       if (containers.length&&arr.length) await fillPassengerCardNew(containers[0],arr[0],0);
       await fillContactInfoNew();
     });
-    
+
     document.getElementById('aerofill-clear-log').addEventListener('click',clearLog);
 
     // 自动解析（输入或失焦时）
@@ -1059,6 +1072,27 @@ v2.1 (2025-12-24)
     // 直接注入控制面板，不等待特定元素
     logToConsole('脚本已加载，注入控制台面板');
     injectPanel();
+
+    // 监听URL变化，适用于单页应用
+    let currentUrl = window.location.href;
+    const checkUrlChange = () => {
+      if (window.location.href !== currentUrl) {
+        currentUrl = window.location.href;
+        logToConsole('检测到URL变化:', currentUrl);
+
+        // 如果URL包含乘客页面路径，检查容器并注入面板
+        if (currentUrl.includes('/sb/passengers/') ||
+            currentUrl.includes('/ru-en') ||
+            currentUrl.includes('/ru') ||
+            currentUrl.includes('/en')) {
+          logToConsole('检查容器并注入控制面板');
+          injectPanel();
+        }
+      }
+    };
+
+    // 定期检查URL变化和容器状态
+    setInterval(checkUrlChange, 1000);
 
   })();
 
