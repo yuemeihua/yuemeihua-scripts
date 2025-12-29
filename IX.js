@@ -3,7 +3,7 @@
 // @namespace    https://example.com/
 // @version      1.0
 // @description  Air India Express (IX) 乘客页自动填写护照信 - 悦美华
-// @author       自动生成
+// @author       胡朗
 // @match        https://www.airindiaexpress.com/*
 // @grant        none
 // @run-at       document-idle
