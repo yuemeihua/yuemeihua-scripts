@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         携程商旅乘机人自动填写 (SSR DOCS 解析)
 // @namespace    https://example.com/
-// @version      1.9
-// @description  在携程商旅乘客页自动填写护照信息（SSR DOCS 格式解析；支持自动添加乘机人；支持性别/姓名/出生日期/国籍等自动填充）
+// @version      2.0
+// @description  在携程商旅乘客页自动填写护照信息（SSR DOCS 格式解析；支持自动添加乘机人；支持性别/姓名/出生日期/国籍/证件类型等自动填充）
 // @author       胡朗
 // @match        https://ct.ctrip.com/corp-flight-booking/*
 // @grant        none
@@ -10,6 +10,17 @@
 // @updateURL    https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/shanglv.js
 // @downloadURL  https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/shanglv.js
 // ==/UserScript==
+
+/*
+更新日志：
+v2.0 (2026-06-15)
+- 修复国籍/证件签署国因携程组件版本号变更（2311→2362）导致无法填写的问题
+  改为版本无关的属性选择器，避免后续再次失效
+- 新增证件类型自动选择（国际航班默认“护照”）
+- 优化国家下拉定位逻辑（按可见 country-item 及位置匹配，更稳定）
+- 优化搜索框输入使用 nativeSetter，避免被框架拦截
+- setNationality 增加返回值与统一日志输出
+*/
 
 /*
 更新日志：
@@ -572,146 +583,161 @@ function waitForNetworkRequests(timeout = 5000) {
     logToConsole(`添加完成，当前乘机人数量：${finalCount}`);
   }
 
+  // 版本无关的选择器：携程组件类名常带版本号（如 corp-design-2362-*），
+  // 这里用属性包含匹配，避免每次版本升级都失效
+  const SEL = {
+    selector:   '[class*="-select-selector"]',
+    dropdown:   '[class*="-select-dropdown"]',
+    ddHidden:   /-select-dropdown-hidden/,
+    searchInput:'[class*="search-input"] input, [class*="search-input"]',
+    countryItem:'[class*="country-item"]',
+    countryLbl: '[class*="country-label"]'
+  };
+
   // 在下拉选择框中选择国家(i=0为国籍；i=1为签发国)
   async function setNationality(boxId, country, i) {
-  console.log(`开始为 ${boxId} 设置国家: ${country}`);
+    console.log(`开始为 ${boxId} 设置国家: ${country}`);
 
-  // 1. 定位乘客信息卡和 Select 按钮
-  const box = document.getElementById(boxId);
-  if (!box) {
-    console.error(`未找到乘客信息卡: ${boxId}`);
-    return;
-  }
-
-  // 查找 .corp-design-2311-select-selector 并验证外层有“国籍（国家/地区）”
-  //通过i来判断选择国籍还是签发国家
-  const targetLabel = i === 0 ? '国籍（国家/地区）' : '证件签署国';
-  const select = Array.from(box.querySelectorAll('.corp-design-2311-select-selector')).find(sel => {
-  // 向上查找包含 index-module_country-label__sUxh- 的父级
-  let parent = sel;
-  while (parent && parent !== box) {
-    const label = parent.querySelector('.index-module_country-label__sUxh-');
-    if (label && label.textContent.trim() === targetLabel) {
-      return true;
+    const box = document.getElementById(boxId);
+    if (!box) {
+      logToConsole(`❌ 未找到乘客信息卡: ${boxId}`);
+      return false;
     }
-    parent = parent.parentElement;
-  }
-  return false;
-  });
 
-  if (!select) {
-    console.error(`未找到 Select 选择器 in ${boxId}`);
-    return;
-  }
+    const targetLabel = i === 0 ? '国籍（国家/地区）' : '证件签署国';
 
-  // 2. 模拟点击打开下拉菜单
-  const triggerClick = (element) => {
-    ['mousedown', 'click'].forEach(eventType => {
-      const event = new MouseEvent(eventType, {
-        bubbles: true,
-        cancelable: true,
-        view: window
-      });
-      element.dispatchEvent(event);
-    });
-  };
-  triggerClick(select);
-  console.log('已触发 Select 点击');
+    // 通过 country-label 文本定位对应的 select 选择器
+    const labelEls = box.querySelectorAll(SEL.countryLbl);
+    let select = null;
+    for (const lbl of labelEls) {
+      if (lbl.textContent.trim() !== targetLabel) continue;
+      const wrap = lbl.parentElement;
+      select = wrap ? wrap.querySelector(SEL.selector) : null;
+      if (select) break;
+    }
+    if (!select) {
+      logToConsole(`❌ 未找到“${targetLabel}”选择器 in ${boxId}`);
+      return false;
+    }
 
-  // 3. 查找匹配的下拉菜单
-  const findDropdown = () => {
-    return new Promise((resolve, reject) => {
-      // 尝试查找现有下拉
-      const checkDropdowns = () => {
-        const dropdowns = document.querySelectorAll('.corp-design-2311-select-dropdown');
-        let targetDropdown = null;
+    const triggerClick = (el) => {
+      ['mousedown', 'mouseup', 'click'].forEach(t =>
+        el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window }))
+      );
+    };
+
+    const findDropdown = (timeout = 2000) => new Promise((resolve, reject) => {
+      const check = () => {
+        const dropdowns = document.querySelectorAll(SEL.dropdown);
+        let target = null;
         let minDiff = Infinity;
         const rect = select.getBoundingClientRect();
-
         dropdowns.forEach(dd => {
-          if (dd.classList.contains('corp-design-2311-select-dropdown-hidden')) return;
-
-          const insetStyle = dd.style.inset || (dd.getAttribute('style') || '').match(/inset:\s*([^;]+)/)?.[1];
-          if (!insetStyle) return;
-
-          const parts = insetStyle.trim().split(/\s+/);
-          const top = parseFloat(parts[0].replace('px', '')) + window.scrollY;
-          const left = parseFloat(parts[3].replace('px', '')) + window.scrollX;
-
-          const diffTop = Math.abs(top - (rect.bottom + window.scrollY));
-          const diffLeft = Math.abs(left - (rect.left + window.scrollX));
-          const diff = diffTop + diffLeft;
-
-          if (diff < minDiff) {
-            minDiff = diff;
-            targetDropdown = dd;
-          }
+          if (SEL.ddHidden.test(dd.className)) return;
+          // 优先取包含可见 country-item 的下拉
+          const items = dd.querySelectorAll(SEL.countryItem);
+          if (items.length === 0) return;
+          const ddRect = dd.getBoundingClientRect();
+          const diff = Math.abs(ddRect.top - rect.bottom) + Math.abs(ddRect.left - rect.left);
+          if (diff < minDiff) { minDiff = diff; target = dd; }
         });
+        return target;
+      };
+      const immediate = check();
+      if (immediate) return resolve(immediate);
 
-        return targetDropdown;
+      const observer = new MutationObserver(() => {
+        const r = check();
+        if (r) { observer.disconnect(); resolve(r); }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      setTimeout(() => { observer.disconnect(); reject(new Error('未找到下拉菜单，超时')); }, timeout);
+    });
+
+    const pickItem = (targetDropdown) => new Promise((resolve) => {
+      const searchInput = targetDropdown.querySelector(SEL.searchInput);
+      const tryPick = () => {
+        const items = Array.from(targetDropdown.querySelectorAll(SEL.countryItem))
+          .filter(it => it.offsetParent !== null);
+        const match = items.find(it => it.textContent.trim() === country);
+        if (match) {
+          match.click();
+          select.blur();
+          logToConsole(`✅ 已选择${targetLabel}：${country}`);
+          return true;
+        }
+        return false;
       };
 
-      // 立即检查
-      const targetDropdown = checkDropdowns();
-      if (targetDropdown) {
-        console.log('立即找到匹配的下拉菜单', targetDropdown);
-        resolve(targetDropdown);
-        return;
-      }
-
-      // 如果未找到，监听 DOM 变化
-      const observer = new MutationObserver((mutations) => {
-        const targetDropdown = checkDropdowns();
-        if (targetDropdown) {
-          console.log('通过 MutationObserver 找到匹配的下拉菜单', targetDropdown);
-          observer.disconnect();
-          resolve(targetDropdown);
-        }
-      });
-
-      observer.observe(document.body, { childList: true, subtree: true });
-
-      // 超时 2 秒
-      setTimeout(() => {
-        observer.disconnect();
-        reject(new Error('未找到下拉菜单，超时'));
-      }, 2000);
-    });
-  };
-
-  // 4. 执行下拉选择逻辑
-  findDropdown()
-    .then(targetDropdown => {
-      // 尝试使用搜索框
-      const searchInput = targetDropdown.querySelector('.index-module_search-input__h3yRd input');
-      if (searchInput) {
-        console.log('找到搜索输入框，尝试搜索');
-        const searchTerm = country.substring(0, 2); // "中国大陆" -> "中国"
-        searchInput.value = searchTerm;
+      if (searchInput && searchInput.tagName === 'INPUT') {
+        // 用 nativeSetter 避免被 React 拦截
+        nativeSetValue(searchInput, country.substring(0, 2));
         searchInput.dispatchEvent(new InputEvent('input', { bubbles: true }));
-        console.log(`已输入搜索词: ${searchTerm}`);
-
-        // 等待列表过滤
-        setTimeout(() => {
-          const items = targetDropdown.querySelectorAll('.index-module_country-item__ZQ3A1');
-          let found = false;
-          items.forEach(item => {
-            if (item.style.display === 'none') return;
-            if (item.textContent.trim() === country) {
-              item.click();
-              select.blur();
-              console.log(`已选择国家: ${country}`);
-              found = true;
-            }
-          });
-        }, 200); // 等待过滤
+        setTimeout(() => resolve(tryPick()), 250);
+      } else {
+        resolve(tryPick());
       }
-    })
-    .catch(err => {
-      console.error(err.message);
     });
 
-}
+    try {
+      triggerClick(select);
+      const dd = await findDropdown();
+      await pickItem(dd);
+      return true;
+    } catch (err) {
+      logToConsole(`❌ ${targetLabel}选择失败：${err.message}`);
+      return false;
+    }
+  }
+
+  // 选择证件类型（国际航班固定为“护照”）
+  async function setCertificateType(boxId, certName = '护照') {
+    const box = document.getElementById(boxId);
+    if (!box) return false;
+    const certBox = box.querySelector('.title-container.CertificateType, [class*="CertificateType"]');
+    if (!certBox) {
+      logToConsole('❌ 未找到证件类型选择器');
+      return false;
+    }
+    // 若已选中则跳过（选中值显示在 .titleChoose，未选时 label 在 .titleText）
+    const chosen = certBox.querySelector('.titleChoose')?.textContent?.trim() || '';
+    if (chosen === certName) {
+      logToConsole(`✅ 证件类型已是：${certName}`);
+      return true;
+    }
+    const trigger = certBox.querySelector('.drop-container .searchContainer, .drop-container') || certBox;
+    const triggerClick = (el) => {
+      ['mousedown', 'mouseup', 'click'].forEach(t =>
+        el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window })));
+    };
+    triggerClick(trigger);
+
+    const findItem = (timeout = 2000) => new Promise((resolve, reject) => {
+      const check = () => {
+        const items = Array.from(box.querySelectorAll('.li-title, [class*="li-title"]'))
+          .filter(e => e.offsetParent !== null && e.textContent.trim() === certName);
+        return items[0] || null;
+      };
+      const imm = check();
+      if (imm) return resolve(imm);
+      const observer = new MutationObserver(() => {
+        const r = check();
+        if (r) { observer.disconnect(); resolve(r); }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+      setTimeout(() => { observer.disconnect(); reject(new Error('证件类型下拉未出现')); }, timeout);
+    });
+
+    try {
+      const item = await findItem();
+      triggerClick(item);
+      logToConsole(`✅ 已选择证件类型：${certName}`);
+      return true;
+    } catch (e) {
+      logToConsole(`❌ 证件类型选择失败：${e.message}`);
+      return false;
+    }
+  }
 
   // 通过 placeholder 填写时间，带重试机制
   async function setInputByPlaceholder(psgBoxId, placeholderText, value) {
@@ -793,7 +819,12 @@ function waitForNetworkRequests(timeout = 5000) {
 
       await sleep(200);
 
-      // 5. 选择国籍
+      // 5. 选择证件类型（国际航班默认护照）
+      await setCertificateType(cardId, '护照');
+      await waitForNetworkRequests(500);
+      await sleep(200);
+
+      // 6. 选择国籍
       if (data.nationalityFull) {
         await setNationality(cardId, data.nationalityFull, 0);
         await waitForNetworkRequests(800); // 等待网络请求，最多5秒
@@ -802,7 +833,7 @@ function waitForNetworkRequests(timeout = 5000) {
 
       await sleep(300);
 
-      // 6. 填写证件号码
+      // 7. 填写证件号码
       if (data.passportNumber) {
         await passwordLabelText(cardEl, '证件号码', data.passportNumber);
       } else {
@@ -812,7 +843,7 @@ function waitForNetworkRequests(timeout = 5000) {
 
       await sleep(400);
 
-      // 7. 设置证件有效期
+      // 8. 设置证件有效期
       if (data.expirationDate) {
         try {
           await setInputByPlaceholder(cardId, '证件有效期', data.expirationDate);
@@ -825,7 +856,7 @@ function waitForNetworkRequests(timeout = 5000) {
 
       await sleep(200);
 
-      // 8. 选择证件签署国
+      // 9. 选择证件签署国
       if (data.issuingCountryFull) {
         await setNationality(cardId, data.issuingCountryFull, 1);
         await waitForNetworkRequests(800); // 等待网络请求，最多5秒
@@ -834,7 +865,7 @@ function waitForNetworkRequests(timeout = 5000) {
 
       await sleep(200);
 
-      // 9. 填写手机号（如果存在）
+      // 10. 填写手机号（如果存在）
       const phoneInput = cardEl.querySelector('.input-area input') ||
         cardEl.querySelector('input[placeholder*="手机"]');
       if (phoneInput) {
@@ -843,7 +874,7 @@ function waitForNetworkRequests(timeout = 5000) {
         logToConsole('已设置手机号：', DEFAULT_PHONE);
       }
 
-      // 10. 默认勾选同意条款
+      // 11. 默认勾选同意条款
       const checkbox = cardEl.querySelector('.checkBox .checkboxCircle') ||
         document.querySelector('#flt-ui-pc-book-footer-tips-radio .checkboxCircle');
       if (checkbox && !checkbox.classList.contains('checked')) {
