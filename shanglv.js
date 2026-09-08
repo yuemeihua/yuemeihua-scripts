@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         携程商旅乘机人自动填写 (SSR DOCS 解析)
 // @namespace    https://example.com/
-// @version      3.0
-// @description  在携程商旅乘客页自动填写护照信息（SSR DOCS 格式解析；支持性别/姓名/出生日期/国籍/证件类型等自动填充；全语义定位，不依赖组件版本号）
+// @version      3.1
+// @description  在携程商旅乘客页自动填写护照信息（SSR DOCS 格式解析；自动勾选乘机人→清空→填充；锁定乘客自动替换并本地黑名单；手机号/邮箱严格校验）
 // @author       胡朗
 // @match        https://ct.ctrip.com/corp-flight-booking/*
 // @grant        none
@@ -13,15 +13,23 @@
 
 /*
 更新日志：
+v3.1 (2026-09-08)
+- "填写全部"升级为完整流程：自动勾选乘机人（弹窗内优先选"信息不完善"的可编辑乘客、按 SSR 姓名拼音搜索精确匹配）→ 清空 → 填充 SSR
+- 黑名单机制（localStorage 持久化）：员工管理预填姓名、无法按 SSR 修改的乘客（提交时弹"请差旅管理员前往员工管理修改"），
+  一经发现立即删除该乘客卡片、自动补选其他乘客，并将该乘客加入本地黑名单，后续勾选自动跳过
+- 若页面已手动选好乘机人：只填充空字段，不覆盖已有值；黑名单替换逻辑仍然生效
+- 中文姓名一律清空留空；联系人"姓名（选填）"清空（已空则不动）
+- 手机号严格校验：乘机人手机号与联系电话均强制为 18610429740（已是则不改，不是则改）
+- 邮箱严格校验：强制为 yuemeihuafly@163.com（已是则不改，不是则改）
+- 自动关闭"员工中文姓名、英文姓名请差旅管理员前往员工管理修改"提示弹窗（点"好的"）
+- 移除卡片时从后往前删，避免索引位移
+*/
+
+/*
+更新日志：
 v3.0 (2026-09-08)
-- 适配携程商旅新版预订页：新增"请选择乘机人"弹窗步骤（先从乘机人库勾选，再生成填写卡片）
-- 彻底放弃精准 CSS 定位，全部改为语义化定位，网站组件升级不再导致脚本失效：
-  * 文本输入框：按 placeholder 文案关键词匹配（"例：CHEN" / "例：YIYI" / "出生日期" / "证件有效期" / "证件号码" 等）
-  * 下拉框（国籍/证件类型/签署国）：按 label 文本就近定位触发器，属性包含匹配 [class*="-select-selector"]
-  * 国家下拉：自动在面板搜索框中输入国家全名过滤，按选项文本精确匹配点击
-  * 性别：radio[value=M/F] 原生点击，兼容文本兜底
-- 旧版"添加乘机人"按钮已不存在：改为自动打开乘机人选择弹窗并勾选
-- 移除有缺陷的 XHR/fetch 代理等待机制，改为固定间隔 + 填写后校验重试，更稳定
+- 适配携程商旅新版预订页：新增"请选择乘机人"弹窗步骤
+- 全语义化定位（placeholder/label 文本/属性包含匹配），不依赖组件版本号
 */
 
 /*
@@ -154,8 +162,50 @@ v1.0~v1.5 (2025-09)
     // 可继续添加更多国家代码映射
   };
 
-  // 默认手机号
+  // 默认手机号（严格校验：不是该值就改）
   const DEFAULT_PHONE = '18610429740';
+  // 默认邮箱（严格校验）
+  const DEFAULT_EMAIL = 'yuemeihuafly@163.com';
+
+  // ============ 本地黑名单（localStorage 持久化） ============
+  // 记录无法按 SSR 修改姓名的乘客（员工管理预填），勾选时自动跳过
+  const BLACKLIST_KEY = 'ctripFillBlacklist';
+
+  function getBlacklist() {
+    try {
+      return JSON.parse(localStorage.getItem(BLACKLIST_KEY) || '[]');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function saveBlacklist(list) {
+    try {
+      localStorage.setItem(BLACKLIST_KEY, JSON.stringify(list));
+    } catch (e) { /* ignore */ }
+  }
+
+  function addToBlacklist(aliases) {
+    const list = getBlacklist();
+    let added = 0;
+    (Array.isArray(aliases) ? aliases : [aliases]).forEach(a => {
+      const id = normalizeText(a);
+      if (id && !list.includes(id)) {
+        list.push(id);
+        added++;
+      }
+    });
+    if (added) {
+      saveBlacklist(list);
+      logToConsole(`🚫 已加入本地黑名单：${(Array.isArray(aliases) ? aliases : [aliases]).join(' | ')}（共 ${list.length} 条）`);
+    }
+  }
+
+  function isBlacklisted(text) {
+    const t = normalizeText(text);
+    if (!t) return false;
+    return getBlacklist().some(id => id && (t.includes(id) || id.includes(t)));
+  }
 
   function logToConsole(...args) {
     console.log('[携程填写]', ...args);
@@ -343,16 +393,6 @@ v1.0~v1.5 (2025-09)
 
   // ============ 字段级填写 ============
 
-  async function fillSurname(card, value) {
-    const input = findInputByPlaceholder(card, ['CHEN', '姓']);
-    return ensureInputValue(input, value, '姓（拼音）');
-  }
-
-  async function fillGivenName(card, value) {
-    const input = findInputByPlaceholder(card, ['YIYI', '名']);
-    return ensureInputValue(input, value, '名（拼音）');
-  }
-
   async function fillBirthDate(card, value) {
     const input = findInputByPlaceholder(card, ['出生日期', '生日']);
     return ensureInputValue(input, value, '出生日期', { withEnter: true, retries: 5 });
@@ -366,16 +406,6 @@ v1.0~v1.5 (2025-09)
   async function fillExpiryDate(card, value) {
     const input = findInputByPlaceholder(card, ['证件有效期', '有效期']);
     return ensureInputValue(input, value, '证件有效期', { withEnter: true, retries: 5 });
-  }
-
-  async function fillPhoneIfNeeded(card) {
-    const input = findInputByPlaceholder(card, ['手机', '航司', '接收']);
-    if (!input) return false;
-    if (normalizeText(input.value) !== '') {
-      logToConsole(`ℹ️ 手机号已有值：${input.value}，跳过`);
-      return true;
-    }
-    return ensureInputValue(input, DEFAULT_PHONE, '手机号');
   }
 
   async function selectGender(card, gender) {
@@ -409,7 +439,8 @@ v1.0~v1.5 (2025-09)
   }
 
   // 选择国籍/证件签署国（countryLabel 传 label 文本；selectOrder 传顺序兜底值）
-  async function selectCountryLike(card, country, labelText, selectOrder) {
+  // mode='emptyOnly' 时：已有选中值则保留，不覆盖
+  async function selectCountryLike(card, country, labelText, selectOrder, mode = 'full') {
     const trigger = findSelectTrigger(card, labelText, selectOrder);
     if (!trigger) {
       logToConsole(`❌ 未找到"${labelText}"下拉框`);
@@ -419,6 +450,10 @@ v1.0~v1.5 (2025-09)
     const current = normalizeText(findSelectTrigger(card, labelText, selectOrder)?.textContent);
     if (current === normalizeText(country)) {
       logToConsole(`✅ ${labelText}已是：${country}`);
+      return true;
+    }
+    if (mode === 'emptyOnly' && current && current !== labelText) {
+      logToConsole(`ℹ️ ${labelText}已有值：${current}，跳过`);
       return true;
     }
     const dd = await openDropdown(trigger);
@@ -473,55 +508,199 @@ v1.0~v1.5 (2025-09)
     return document.getElementById(`edit_psg_box-${index}`);
   }
 
+  function getAllCards() {
+    return Array.from(document.querySelectorAll('[id^="edit_psg_box-"]'));
+  }
+
   function detectPassengerCount() {
-    const cards = Array.from(document.querySelectorAll('[id^="edit_psg_box-"]'));
+    const cards = getAllCards();
     logToConsole(`检测到乘机人卡片数量：${cards.length}`);
     return cards.length;
   }
 
-  // 打开乘机人选择弹窗
-  async function openPassengerPicker() {
-    const entry = Array.from(document.querySelectorAll('div, span')).find(el =>
-      el.offsetParent !== null && el.children.length === 0 && el.textContent.trim() === '请选择乘机人'
+  // 会话超时弹窗（"您的停留时间过长..."）检测：出现即代表预订会话失效，无法自动恢复
+  function isSessionTimeoutModal(modal) {
+    return modal && modal.textContent.includes('停留时间过长');
+  }
+
+  // 自动关闭"员工中文姓名、英文姓名请差旅管理员前往员工管理修改"提示弹窗
+  async function dismissNameModifyPopup() {
+    const modals = Array.from(document.querySelectorAll('[class*="modal-content"]')).filter(m =>
+      m.offsetParent !== null && m.getBoundingClientRect().height > 0
     );
-    if (!entry) {
-      logToConsole('❌ 未找到"请选择乘机人"入口');
-      return null;
+    for (const m of modals) {
+      if (isSessionTimeoutModal(m)) {
+        logToConsole('🛑 预订会话已过期（页面提示停留时间过长），请重新搜索航班后再运行脚本');
+        const knowBtn = Array.from(m.querySelectorAll('a[role="button"], button, span')).find(el =>
+          el.textContent.trim() === '知道了'
+        );
+        if (knowBtn) triggerClick(knowBtn.closest('a[role="button"], button') || knowBtn);
+        return 'session_expired';
+      }
+      if (m.textContent.includes('员工管理修改') || m.textContent.includes('前往员工管理')) {
+        const okBtn = Array.from(m.querySelectorAll('a[role="button"], button, span')).find(el =>
+          el.offsetParent !== null && el.textContent.trim() === '好的'
+        );
+        if (okBtn) {
+          triggerClick(okBtn.closest('a[role="button"], button') || okBtn);
+          logToConsole('⚠️ 检测到"姓名需员工管理修改"弹窗，已点击好的关闭');
+          await sleep(600);
+          return 'dismissed';
+        }
+      }
     }
-    triggerClick(entry.closest('div[class]') || entry);
+    return false;
+  }
+
+  // 打开乘机人选择弹窗（点击失败自动重试；忽略无关弹窗干扰）
+  async function openPassengerPicker() {
+    // 先处理可能挡路的提示弹窗
+    const guard = await dismissNameModifyPopup();
+    if (guard === 'session_expired') return null;
+    let clicked = false;
     const start = Date.now();
-    while (Date.now() - start < 4000) {
-      await sleep(300);
-      const modal = document.querySelector('[class*="modal-content"]');
-      if (modal && modal.offsetParent !== null && modal.textContent.includes('请选择乘机人')) return modal;
+    while (Date.now() - start < 6000) {
+      const entry = Array.from(document.querySelectorAll('div, span')).find(el =>
+        el.offsetParent !== null && el.children.length === 0 && el.textContent.trim() === '请选择乘机人'
+      );
+      if (!entry) {
+        logToConsole('❌ 未找到"请选择乘机人"入口');
+        return null;
+      }
+      triggerClick(entry.closest('div[class]') || entry);
+      clicked = true;
+      // 等待目标弹窗出现（跳过其他无关弹窗）
+      const waitStart = Date.now();
+      while (Date.now() - waitStart < 1500) {
+        await sleep(300);
+        const modal = document.querySelector('[class*="modal-content"]');
+        if (modal && modal.offsetParent !== null && modal.getBoundingClientRect().height > 0) {
+          if (modal.textContent.includes('请选择乘机人')) return modal;
+          if (isSessionTimeoutModal(modal)) {
+            logToConsole('🛑 预订会话已过期（页面提示停留时间过长），请重新搜索航班后再运行脚本');
+            const knowBtn = Array.from(modal.querySelectorAll('a[role="button"], button, span')).find(el =>
+              el.textContent.trim() === '知道了'
+            );
+            if (knowBtn) triggerClick(knowBtn.closest('a[role="button"], button') || knowBtn);
+            return null;
+          }
+          // 其他弹窗：尝试点其关闭按钮后继续
+          const closeBtn = modal.querySelector('[class*="modal-close"]');
+          if (closeBtn) { closeBtn.click(); await sleep(400); }
+        }
+      }
     }
-    logToConsole('❌ 乘机人选择弹窗未打开');
+    if (clicked) logToConsole('❌ 乘机人选择弹窗未打开');
     return null;
   }
 
-  // 在弹窗中勾选第 n 个乘机人（1-based），返回是否成功
-  async function checkNthPassenger(modal, n) {
-    const rows = Array.from(modal.querySelectorAll('[class*="passenger-list-container"], [class*="passenger-check"]'))
+  // 实时获取当前打开的乘机人选择弹窗（React 重渲染会替换节点，禁止缓存引用）
+  function getPickerModal() {
+    const modal = document.querySelector('[class*="modal-content"]');
+    if (modal && modal.offsetParent !== null && modal.getBoundingClientRect().height > 0 && modal.textContent.includes('请选择乘机人')) {
+      return modal;
+    }
+    return null;
+  }
+
+  // 获取弹窗中乘机人行列表（实时查询，勿缓存 modal 引用）
+  function getModalRows() {
+    const modal = getPickerModal();
+    if (!modal) return [];
+    return Array.from(modal.querySelectorAll('[class*="passenger-list-container"]'))
       .filter(r => r.offsetParent !== null && r.querySelector('input[type="checkbox"]'));
-    // 去重（passenger-check 是 passenger-list-container 的子节点）
-    const unique = [];
-    for (const r of rows) {
-      if (!unique.some(u => u.contains(r) || r.contains(u))) unique.push(r);
+  }
+
+  // 行是否为"信息不完善"乘客（可自由编辑姓名，优先选用）
+  function rowIsIncomplete(row) {
+    return !row.textContent.includes('护照');
+  }
+
+  // 等待弹窗乘机人列表加载完成（列表为异步加载，直接选行会拿到空列表）
+  async function waitForModalRows(timeout = 10000) {
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      const rows = getModalRows();
+      if (rows.length > 0) return rows;
+      await sleep(400);
     }
-    const target = unique[n - 1];
-    if (!target) {
-      logToConsole(`❌ 弹窗中找不到第 ${n} 个乘机人`);
-      return false;
+    return [];
+  }
+
+  // 在弹窗搜索框中搜索关键字（用于按拼音精确匹配 SSR 乘客）
+  async function searchInModal(keyword) {
+    const modal = getPickerModal();
+    if (!modal) return false;
+    const searchInput = modal.querySelector('input[class*="input-search"][type="text"], [class*="list_search"] input');
+    if (!searchInput) return false;
+    nativeSetValue(searchInput, keyword);
+    searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(1000);
+    return true;
+  }
+
+  async function clearModalSearch() {
+    const modal = getPickerModal();
+    if (!modal) return false;
+    const searchInput = modal.querySelector('input[class*="input-search"][type="text"], [class*="list_search"] input');
+    if (searchInput && searchInput.value) {
+      nativeSetValue(searchInput, '');
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(800);
     }
-    const cb = target.querySelector('input[type="checkbox"]');
+    return true;
+  }
+
+  // 为一条 SSR 数据挑选弹窗中的行：
+  // 1) 按姓名拼音搜索精确匹配（完整员工，身份一致可保留）
+  // 2) 第一个未勾选、非黑名单的"信息不完善"行（可自由编辑）
+  // 3) 第一个未勾选、非黑名单的行
+  async function pickRowForData(data) {
+    // 0. 先等列表加载完成
+    await waitForModalRows();
+    // 1. 拼音精确匹配（记住姓名，清空搜索后重新定位，防止 React 重建节点导致引用失效）
+    if (data.surname && data.givenName) {
+      const pinyin = `${data.surname}/${data.givenName}`.toUpperCase();
+      const pinyinCompact = pinyin.replace('/', '');
+      await searchInModal(data.surname);
+      await waitForModalRows(5000);
+      const hitRow = getModalRows().find(r => {
+        const t = normalizeText(r.textContent).toUpperCase();
+        return t.includes(pinyin) || t.includes(pinyinCompact);
+      });
+      const hitName = hitRow ? hitRow.querySelector('.passenger-name')?.textContent.trim() : null;
+      await clearModalSearch();
+      await waitForModalRows(5000);
+      if (hitName) {
+        const relocate = getModalRows().find(r =>
+          normalizeText(r.querySelector('.passenger-name')?.textContent) === normalizeText(hitName)
+        );
+        if (relocate) return { row: relocate, reason: `SSR姓名精确匹配(${hitName})` };
+      }
+    }
+    // 2/3. 通用选择
+    const rows = getModalRows();
+    const unchecked = rows.filter(r => !r.querySelector('input[type="checkbox"]').checked && !isBlacklisted(r.textContent));
+    if (unchecked.length === 0) return null;
+    const incomplete = unchecked.find(rowIsIncomplete);
+    if (incomplete) return { row: incomplete, reason: '信息不完善乘客(可编辑)' };
+    return { row: unchecked[0], reason: '第一个可用乘客' };
+  }
+
+  // 勾选一行（原生 click 生效）
+  async function checkRow(row) {
+    const cb = row.querySelector('input[type="checkbox"]');
+    if (!cb) return false;
     if (cb.checked) return true;
     cb.click();
     await sleep(300);
     return cb.checked;
   }
 
-  // 点击弹窗"确定"
-  async function confirmPassengerModal(modal) {
+  // 点击弹窗"确定"（实时查询弹窗）
+  async function confirmPassengerModal() {
+    const modal = getPickerModal();
+    if (!modal) return false;
     const btn = Array.from(modal.querySelectorAll('a[role="button"], button')).find(b =>
       b.offsetParent !== null && b.textContent.trim() === '确定'
     );
@@ -534,93 +713,277 @@ v1.0~v1.5 (2025-09)
     return true;
   }
 
-  // 自动添加乘机人到目标数量（新版：通过选择弹窗勾选）
-  async function addPassengersToTarget(targetCount) {
-    let current = detectPassengerCount();
-    if (current >= targetCount) {
-      logToConsole(`当前已有${current}位乘机人，无需添加`);
-      return;
+  // 自动补充乘机人到目标数量（新版：通过选择弹窗勾选，跳过黑名单）
+  async function addPassengersToTarget(targetCount, passports = []) {
+    let guard = 0;
+    while (detectPassengerCount() < targetCount && guard++ < targetCount + 3) {
+      const before = getAllCards().length;
+      const modal = await openPassengerPicker();
+      if (!modal) return;
+      const data = passports[before] || {};
+      const picked = await pickRowForData(data);
+      if (!picked) {
+        logToConsole('❌ 弹窗中已无可选乘机人（可能都被加入黑名单或列表加载不完全），请手动选择');
+        // 关闭弹窗
+        const fresh = getPickerModal();
+        const cancel = fresh && Array.from(fresh.querySelectorAll('a[role="button"], button')).find(b =>
+          b.offsetParent !== null && b.textContent.trim() === '取消'
+        );
+        if (cancel) triggerClick(cancel);
+        return;
+      }
+      logToConsole(`➡️ 勾选乘机人：${picked.reason}`);
+      // 勾选前按姓名重新定位行（防 React 重建节点）
+      const rowName = picked.row.querySelector('.passenger-name')?.textContent.trim();
+      const freshRow = (rowName && getModalRows().find(r =>
+        r.querySelector('.passenger-name')?.textContent.trim() === rowName
+      )) || picked.row;
+      await checkRow(freshRow);
+      await confirmPassengerModal();
+      await sleep(800);
+      const after = getAllCards().length;
+      if (after <= before) {
+        logToConsole('⚠️ 勾选后卡片数量未增加，停止自动添加');
+        return;
+      }
     }
-    logToConsole(`需要添加${targetCount - current}位乘机人（新版需从乘机人库勾选）`);
-    const modal = await openPassengerPicker();
-    if (!modal) return;
-    // 勾选到目标数量（已勾选的计入）
-    const checkedBefore = Array.from(modal.querySelectorAll('input[type="checkbox"]')).filter(c => c.checked).length;
-    let toCheck = targetCount - checkedBefore;
-    let idx = checkedBefore;
-    while (toCheck > 0) {
-      idx++;
-      const ok = await checkNthPassenger(modal, idx);
-      if (!ok) break;
-      toCheck--;
+  }
+
+  // 卡片是否带有"员工库完整资料"特征（中文姓名与拼音同时有值 = 勾选完整员工后系统自动带入，
+  // 此类乘客姓名受员工管理保护、提交时会被拦截；脚本填写的卡中文姓名已被清空，不会误判）
+  function isLockedEmployeeCard(card) {
+    const cn = normalizeText((Array.from(card.querySelectorAll('input')).find(i => i.placeholder === '例：陈伊伊') || {}).value);
+    const sur = normalizeText((Array.from(card.querySelectorAll('input')).find(i => i.placeholder === '例：CHEN') || {}).value);
+    return cn !== '' && sur !== '';
+  }
+
+  function cardPrefillName(card) {
+    const sur = Array.from(card.querySelectorAll('input')).find(i => i.placeholder === '例：CHEN');
+    const surVal = normalizeText(sur ? sur.value : '');
+    if (surVal) return surVal;
+    // 姓为空时查看名
+    const given = Array.from(card.querySelectorAll('input')).find(i => i.placeholder === '例：YIYI');
+    return normalizeText(given ? given.value : '');
+  }
+
+  // 删除一张乘机人卡片（点击卡内"删除"）
+  async function removeCard(card) {
+    const del = Array.from(card.querySelectorAll('a, span, div, button')).find(el =>
+      el.offsetParent !== null && el.children.length === 0 && el.textContent.trim() === '删除'
+    );
+    if (!del) {
+      logToConsole('❌ 未找到卡片"删除"按钮');
+      return false;
     }
-    await confirmPassengerModal(modal);
-    await sleep(1000);
-    const after = detectPassengerCount();
-    if (after < targetCount) {
-      logToConsole(`⚠️ 当前卡片数 ${after} 仍少于目标 ${targetCount}，请手动选择乘机人后再填写`);
+    const before = getAllCards().length;
+    triggerClick(del.closest('a, button') || del);
+    const start = Date.now();
+    while (Date.now() - start < 4000) {
+      await sleep(300);
+      if (getAllCards().length < before) {
+        logToConsole('🗑️ 已删除乘机人卡片');
+        await sleep(500);
+        return true;
+      }
     }
+    logToConsole('❌ 删除卡片未生效');
+    return false;
+  }
+
+  // 扫描并替换"锁定乘客"（员工库完整资料、姓名与 SSR 不一致、无法修改的乘客）
+  // 返回 true 表示发生过替换（调用方需重新执行勾选/扫描直至干净）
+  async function replaceLockedPassengers(passports) {
+    await dismissNameModifyPopup();
+    const cards = getAllCards();
+    for (let i = cards.length - 1; i >= 0; i--) {
+      const card = cards[i];
+      if (!isLockedEmployeeCard(card)) continue;
+      const prefill = cardPrefillName(card);
+      const data = passports[i] || {};
+      const ssrName = normalizeText(`${data.surname || ''}${data.givenName || ''}`).toUpperCase();
+      const prefillNorm = normalizeText(prefill).toUpperCase();
+      if (ssrName && (ssrName.includes(prefillNorm) || prefillNorm.includes(ssrName))) continue; // 身份一致，保留
+      // 锁定乘客：黑名单 + 删除（从后往前删避免索引位移）
+      logToConsole(`🚨 第${i + 1}位乘机人姓名"${prefill}"与 SSR${ssrName ? `"${data.surname}/${data.givenName}"` : ''}不符且不可修改，执行替换`);
+      // 收集别名：拼音姓、中文名（若有）
+      const cnInput = Array.from(card.querySelectorAll('input')).find(inp => inp.placeholder === '例：陈伊伊');
+      const aliases = [prefill];
+      const cnVal = normalizeText(cnInput ? cnInput.value : '');
+      if (cnVal && !/^[A-Z]+$/i.test(cnVal)) aliases.push(cnVal);
+      addToBlacklist(aliases);
+      const ok = await removeCard(card);
+      if (!ok) return true; // 视为需要重试
+    }
+    // 删除后若有缺口则补齐（补选时跳过黑名单）
+    if (getAllCards().length < passports.length) {
+      await addPassengersToTarget(passports.length, passports);
+      return true; // 有新增，需重新扫描
+    }
+    return false;
   }
 
   // ============ 单卡填写流程 ============
 
-  async function fillPassengerCard(cardIndex, data) {
+  // 严格填写：值已等于目标则不动，否则强制写入
+  async function strictFillInput(input, value, label) {
+    if (!input) {
+      logToConsole(`❌ 未找到${label}输入框`);
+      return false;
+    }
+    if (normalizeText(input.value) === normalizeText(value)) {
+      logToConsole(`✅ ${label}已是：${value}，跳过`);
+      return true;
+    }
+    const ok = await ensureInputValue(input, value, label, { retries: 4 });
+    // 掩码值（如 136****2030）无法校验，视为已写入
+    if (!ok && (input.value || '').includes('*')) {
+      logToConsole(`⚠️ ${label}显示为掩码，无法校验，视为已填写`);
+      return true;
+    }
+    return ok;
+  }
+
+  // 清空输入框（若有值）
+  async function clearInputValue(input, label) {
+    if (!input) return false;
+    if (normalizeText(input.value) === '') return true; // 已空不管
+    input.focus && input.focus();
+    nativeSetValue(input, '');
+    dispatchInputEvents(input);
+    await sleep(200);
+    if (normalizeText(input.value) === '') {
+      logToConsole(`✅ ${label}已清空`);
+      return true;
+    }
+    // 重试
+    nativeSetValue(input, '');
+    dispatchInputEvents(input);
+    await sleep(200);
+    if (normalizeText(input.value) === '') {
+      logToConsole(`✅ ${label}已清空`);
+      return true;
+    }
+    logToConsole(`❌ ${label}清空失败（当前值：${input.value}）`);
+    return false;
+  }
+
+  // 中文姓名（选填）：一律清空留空
+  async function clearChineseName(card) {
+    const input = findInputByPlaceholder(card, ['陈伊伊', '中文姓名']);
+    return clearInputValue(input, '中文姓名');
+  }
+
+  // 乘机人手机号：严格 18610429740
+  async function fillCardPhoneStrict(card) {
+    const input = findInputByPlaceholder(card, ['航司', '手机']);
+    return strictFillInput(input, DEFAULT_PHONE, '乘机人手机号');
+  }
+
+  // 联系人区域（卡片外）：姓名清空 / 电话与邮箱严格填写
+  async function fillContactSection() {
+    // 姓名（选填）→ 清空
+    const nameInput = findInputByPlaceholder(document, ['请输入名称']);
+    await clearInputValue(nameInput, '联系人姓名');
+    // 联系电话 → 严格
+    const phoneInput = findInputByPlaceholder(document, ['接收短信通知']);
+    await strictFillInput(phoneInput, DEFAULT_PHONE, '联系电话');
+    // 邮箱 → 严格
+    const emailInput = findInputByPlaceholder(document, ['邮箱']);
+    await strictFillInput(emailInput, DEFAULT_EMAIL, '邮箱');
+  }
+
+  // mode: 'full' = 清空重填（脚本自动勾选的新卡）；'emptyOnly' = 只填空字段（已手动选择的卡）
+  async function fillPassengerCard(cardIndex, data, mode = 'full') {
     const card = getCardEl(cardIndex);
     if (!card) {
       logToConsole(`未找到第${cardIndex + 1}位乘机人卡片`);
       return;
     }
-    logToConsole(`开始填写第${cardIndex + 1}位乘机人信息`);
+    logToConsole(`开始填写第${cardIndex + 1}位乘机人信息（${mode === 'full' ? '清空重填' : '只填空字段'}）`);
+    await dismissNameModifyPopup();
 
     try {
+      // 0. 中文姓名一律清空留空
+      await clearChineseName(card);
+      await sleep(150);
+
       // 1. 姓（拼音）
       if (data.surname) {
-        await fillSurname(card, data.surname);
-        await sleep(200);
+        const input = findInputByPlaceholder(card, ['CHEN', '姓']);
+        if (mode === 'full' || normalizeText(input && input.value) === '') {
+          await ensureInputValue(input, data.surname, '姓（拼音）');
+        } else {
+          logToConsole(`ℹ️ 姓已有值：${input.value}，跳过`);
+        }
+        await sleep(150);
       }
       // 2. 名（拼音）
       if (data.givenName) {
-        await fillGivenName(card, data.givenName);
-        await sleep(200);
+        const input = findInputByPlaceholder(card, ['YIYI', '名']);
+        if (mode === 'full' || normalizeText(input && input.value) === '') {
+          await ensureInputValue(input, data.givenName, '名（拼音）');
+        } else {
+          logToConsole(`ℹ️ 名已有值：${input.value}，跳过`);
+        }
+        await sleep(150);
       }
       // 3. 性别
       if (data.gender) {
-        await selectGender(card, data.gender);
-        await sleep(200);
+        if (mode === 'full' || !card.querySelector('input[type="radio"]:checked')) {
+          await selectGender(card, data.gender);
+        } else {
+          logToConsole('ℹ️ 性别已选择，跳过');
+        }
+        await sleep(150);
       }
       // 4. 出生日期
       if (data.birthdate) {
-        await fillBirthDate(card, data.birthdate);
-        await sleep(300);
+        const input = findInputByPlaceholder(card, ['出生日期', '生日']);
+        if (mode === 'full' || normalizeText(input && input.value) === '') {
+          await fillBirthDate(card, data.birthdate);
+        } else {
+          logToConsole(`ℹ️ 出生日期已有值：${input.value}，跳过`);
+        }
+        await sleep(250);
       }
-      // 5. 证件类型（默认护照）
+      // 5. 证件类型（默认护照；已是则内部自动跳过）
       await selectCertificateType(card, '护照');
-      await sleep(200);
+      await sleep(150);
       // 6. 国籍
       if (data.nationalityFull) {
-        await selectCountryLike(card, data.nationalityFull, '国籍（国家/地区）', 0);
-        await sleep(400);
+        await selectCountryLike(card, data.nationalityFull, '国籍（国家/地区）', 0, mode);
+        await sleep(350);
       }
       // 7. 证件号码
       if (data.passportNumber) {
-        await fillPassportNumber(card, data.passportNumber);
-        await sleep(300);
+        const input = findInputByPlaceholder(card, ['证件号码', '护照号']);
+        if (mode === 'full' || normalizeText(input && input.value) === '') {
+          await fillPassportNumber(card, data.passportNumber);
+        } else {
+          logToConsole(`ℹ️ 证件号码已有值，跳过`);
+        }
+        await sleep(250);
       } else {
         logToConsole('❌ 未提供证件号码，跳过填写');
       }
       // 8. 证件有效期
       if (data.expirationDate) {
-        await fillExpiryDate(card, data.expirationDate);
-        await sleep(300);
+        const input = findInputByPlaceholder(card, ['证件有效期', '有效期']);
+        if (mode === 'full' || normalizeText(input && input.value) === '') {
+          await fillExpiryDate(card, data.expirationDate);
+        } else {
+          logToConsole(`ℹ️ 证件有效期已有值，跳过`);
+        }
+        await sleep(250);
       }
       // 9. 证件签署国
       if (data.issuingCountryFull) {
-        await selectCountryLike(card, data.issuingCountryFull, '证件签署国', 2);
-        await sleep(300);
+        await selectCountryLike(card, data.issuingCountryFull, '证件签署国', 2, mode);
+        await sleep(250);
       }
-      // 10. 手机号（为空才填）
-      await fillPhoneIfNeeded(card);
-      await sleep(200);
+      // 10. 乘机人手机号：严格 18610429740
+      await fillCardPhoneStrict(card);
+      await sleep(150);
 
       logToConsole(`第${cardIndex + 1}位乘机人信息填写完成`);
     } catch (e) {
@@ -628,18 +991,42 @@ v1.0~v1.5 (2025-09)
     }
   }
 
-  // 填写所有乘机人
+  // 填写所有乘机人（完整流程：勾选 → 锁定替换 → 填充 → 联系人区）
   async function fillAllPassengers() {
     const passports = window[passportsDataVarName] || [];
     if (passports.length === 0) {
       logToConsole('请先解析护照信息');
       return;
     }
-    await addPassengersToTarget(passports.length);
-    for (let i = 0; i < passports.length; i++) {
-      await fillPassengerCard(i, passports[i]);
+    // 页面上已有卡片 = 用户手动选择 → 只填空字段
+    const hadCards = getAllCards().length > 0;
+    const mode = hadCards ? 'emptyOnly' : 'full';
+    if (hadCards) logToConsole('检测到已选择的乘机人，将只填充空字段');
+
+    // 1. 自动勾选补足人数（跳过黑名单）
+    await addPassengersToTarget(passports.length, passports);
+
+    // 2. 锁定乘客替换循环（替换后重新扫描，最多 5 轮）
+    for (let round = 1; round <= 5; round++) {
+      const replaced = await replaceLockedPassengers(passports);
+      if (!replaced) break;
+      logToConsole(`第 ${round} 轮替换完成，重新检查...`);
       await sleep(500);
     }
+
+    // 3. 逐卡填写
+    const count = getAllCards().length;
+    if (count < passports.length) {
+      logToConsole(`⚠️ 卡片数 ${count} 少于 SSR 乘客数 ${passports.length}，只填写现有卡片`);
+    }
+    for (let i = 0; i < Math.min(count, passports.length); i++) {
+      await fillPassengerCard(i, passports[i], mode);
+      await sleep(400);
+    }
+
+    // 4. 联系人区域（姓名清空 / 电话与邮箱严格）
+    await fillContactSection();
+
     logToConsole('所有乘机人信息填写完成');
   }
 
@@ -751,7 +1138,7 @@ v1.0~v1.5 (2025-09)
     panel.innerHTML = `
       <div id="ctrip-header" style="cursor: move; padding: 6px 10px; background: #ff6600; color: #fff;
            border-radius: 8px 8px 0 0; display: flex; justify-content: space-between; align-items: center;">
-        <span>携程商旅自动填写 v3.0</span>
+        <span>携程商旅自动填写 v3.1</span>
         <button id="ctrip-min" style="background: transparent; border: none; color: #fff; font-size: 14px; cursor: pointer;">—</button>
       </div>
       <div id="ctrip-body" style="padding: 8px;">
@@ -829,7 +1216,7 @@ v1.0~v1.5 (2025-09)
     document.getElementById('ctrip-add-passenger').addEventListener('click', async () => {
       const passports = window[passportsDataVarName] || [];
       const target = Math.max(1, passports.length);
-      await addPassengersToTarget(target);
+      await addPassengersToTarget(target, passports);
     });
 
     document.getElementById('ctrip-fill-all').addEventListener('click', fillAllPassengers);
@@ -838,7 +1225,9 @@ v1.0~v1.5 (2025-09)
       const txt = document.getElementById('ctrip-input').value;
       const arr = parsePassportsFromText(txt);
       if (arr.length > 0) {
-        await fillPassengerCard(0, arr[0]);
+        const existed = !!getCardEl(0);
+        await fillPassengerCard(0, arr[0], existed ? 'emptyOnly' : 'full');
+        await fillContactSection();
       } else {
         logToConsole('请先解析护照信息');
       }
