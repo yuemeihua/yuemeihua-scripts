@@ -8,8 +8,8 @@
 // @match        https://ibe.s7.ru/*
 // @grant        none
 // @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/S7.js
-// @downloadURL  https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/S7.js
+// @updateURL    https://raw.githubusercontent.com/yuemeihua/yuemeihua-scripts/main/S7.js
+// @downloadURL  https://raw.githubusercontent.com/yuemeihua/yuemeihua-scripts/main/S7.js
 // ==/UserScript==
 
 (function () {

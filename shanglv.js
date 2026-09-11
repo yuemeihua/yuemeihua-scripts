@@ -7,8 +7,8 @@
 // @match        https://ct.ctrip.com/corp-flight-booking/*
 // @grant        none
 // @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/shanglv.js
-// @downloadURL  https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/shanglv.js
+// @updateURL    https://raw.githubusercontent.com/yuemeihua/yuemeihua-scripts/main/shanglv.js
+// @downloadURL  https://raw.githubusercontent.com/yuemeihua/yuemeihua-scripts/main/shanglv.js
 // ==/UserScript==
 
 /*

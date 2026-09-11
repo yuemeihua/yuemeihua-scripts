@@ -7,8 +7,8 @@
 // @match        https://www.airindiaexpress.com/*
 // @grant        none
 // @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/IX.js
-// @downloadURL  https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/IX.js
+// @updateURL    https://raw.githubusercontent.com/yuemeihua/yuemeihua-scripts/main/IX.js
+// @downloadURL  https://raw.githubusercontent.com/yuemeihua/yuemeihua-scripts/main/IX.js
 // ==/UserScript==
 
 /*

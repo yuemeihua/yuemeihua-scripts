@@ -7,8 +7,8 @@
 // @match        https://agent.oriental-sky.com/*
 // @grant        none
 // @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/youshun.js
-// @downloadURL  https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/youshun.js
+// @updateURL    https://raw.githubusercontent.com/yuemeihua/yuemeihua-scripts/main/youshun.js
+// @downloadURL  https://raw.githubusercontent.com/yuemeihua/yuemeihua-scripts/main/youshun.js
 // ==/UserScript==
 
 /*

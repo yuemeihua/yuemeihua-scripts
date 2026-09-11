@@ -8,8 +8,8 @@
 // @match        https://www.aeroflot.ru/ru-en*
 // @grant        none
 // @run-at       document-end
-// @updateURL    https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/SU_new.js
-// @downloadURL  https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/SU_new.js
+// @updateURL    https://raw.githubusercontent.com/yuemeihua/yuemeihua-scripts/main/SU_new.js
+// @downloadURL  https://raw.githubusercontent.com/yuemeihua/yuemeihua-scripts/main/SU_new.js
 // ==/UserScript==
 
 

@@ -5,8 +5,8 @@
 // @description  在 Lion Air 乘客页自动填写护照和联系信息（SSR DOCS 粘贴解析）
 // @author       悦美华
 // @match        https://agent.lionair.co.id/*
-// @updateURL    https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/Lion.js
-// @downloadURL  https://raw.githubusercontent.com/tryle17/yuemeihua-scripts/main/Lion.js
+// @updateURL    https://raw.githubusercontent.com/yuemeihua/yuemeihua-scripts/main/Lion.js
+// @downloadURL  https://raw.githubusercontent.com/yuemeihua/yuemeihua-scripts/main/Lion.js
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
