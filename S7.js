@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         S7官网自动填充护照信息
 // @namespace    https://example.com/
-// @version      1.0
+// @version      1.1
 // @description  在 S7 乘客页自动填写护照和联系信息（SSR DOCS 粘贴解析）
 // @author       悦美华
+// @match        https://www.s7.ru/*
 // @match        https://ibe.s7.ru/*
 // @grant        none
 // @run-at       document-idle
@@ -637,7 +638,8 @@
           const opts = Array.from(phoneCodeSelect.options);
           const chinaOpt = opts.find(o => {
             const t = (o.dataset.text || o.textContent || '').toLowerCase();
-            return t.includes('+86') || t.includes('china');
+            // option 文本可能由自定义组件渲染（textContent 为空），需按 value=86 兜底
+            return t.includes('+86') || t.includes('china') || (o.value || '').replace(/\D/g, '') === '86';
           });
           if (chinaOpt) {
             phoneCodeSelect.value = chinaOpt.value;
@@ -773,13 +775,17 @@
   /**************** 监听乘客区块，自动弹出面板 ****************/
 
   function waitForPaxBlocks() {
+    const found = () =>
+      document.querySelector('div[id^="pax_"]') ||
+      document.querySelector('input.js_last_name') ||
+      document.querySelector('input[name*="passengersRequest.passengers"]');
     return new Promise(resolve => {
-      if (document.querySelector('#pax_0')) {
+      if (found()) {
         resolve();
         return;
       }
       const observer = new MutationObserver(() => {
-        if (document.querySelector('#pax_0')) {
+        if (found()) {
           observer.disconnect();
           resolve();
         }
