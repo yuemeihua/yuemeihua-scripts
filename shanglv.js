@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         携程商旅乘机人自动填写 (SSR DOCS 解析)
 // @namespace    https://example.com/
-// @version      3.2
-// @description  在携程商旅乘客页自动填写护照信息（SSR DOCS 格式解析；默认空白乘机人卡，按 SSR 数量自动点"添加乘机人"补足后逐卡填写；手机号/邮箱严格校验）
+// @version      3.3
+// @description  在携程商旅乘客页自动填写护照信息（SSR DOCS 格式解析；默认空白乘机人卡，按 SSR 数量自动点"添加乘机人"补足后逐卡填写；手机号/邮箱严格校验；自动勾选协议声明）
 // @author       胡朗
 // @match        https://ct.ctrip.com/corp-flight-booking/*
 // @grant        none
@@ -10,6 +10,13 @@
 // @updateURL    https://raw.githubusercontent.com/yuemeihua/yuemeihua-scripts/main/shanglv.js
 // @downloadURL  https://raw.githubusercontent.com/yuemeihua/yuemeihua-scripts/main/shanglv.js
 // ==/UserScript==
+
+/*
+更新日志：
+v3.3 (2026-09-11)
+- 新增自动勾选页面底部两个协议声明（"我已阅读并同意接受航班信息免责声明，机票产品预订须知…"
+  与"我已阅读并接受个人信息授权声明"）：未勾选则勾选，已勾选跳过
+*/
 
 /*
 更新日志：
@@ -622,6 +629,40 @@ v1.0~v1.5 (2025-09)
     await strictFillInput(emailInput, DEFAULT_EMAIL, '邮箱');
   }
 
+  // 勾选页面底部的协议勾选框（"我已阅读并同意接受航班信息免责声明…" / "我已阅读并接受个人信息授权声明"）
+  // 未勾选则勾选，已勾选跳过
+  async function checkAgreements() {
+    const boxes = Array.from(document.querySelectorAll('input[type="checkbox"]')).filter(cb => {
+      if (cb.offsetParent === null) return false;
+      if (cb.closest('[id^="edit_psg_box-"]')) return false; // 跳过乘机人卡内勾选框
+      // 行文本包含"我已阅读"（协议声明）
+      let node = cb;
+      for (let i = 0; i < 5 && node; i++) {
+        node = node.parentElement;
+        if (node && /我已阅读/.test(node.textContent || '')) return true;
+      }
+      return false;
+    });
+    if (boxes.length === 0) {
+      logToConsole('⚠️ 未找到协议勾选框');
+      return false;
+    }
+    for (const cb of boxes) {
+      if (cb.checked) {
+        logToConsole('✅ 协议已勾选，跳过');
+        continue;
+      }
+      cb.click();
+      await sleep(300);
+      if (cb.checked) {
+        logToConsole('✅ 已勾选协议');
+      } else {
+        logToConsole('❌ 协议勾选失败，请手动勾选');
+      }
+    }
+    return true;
+  }
+
   // 填写单张乘机人卡（统一清空重填，SSR 数据为准）
   async function fillPassengerCard(cardIndex, data) {
     const card = getCardEl(cardIndex);
@@ -723,6 +764,9 @@ v1.0~v1.5 (2025-09)
 
     // 3. 联系人区域（姓名清空 / 电话与邮箱严格）
     await fillContactSection();
+
+    // 4. 勾选协议（未勾选则勾选，已勾选跳过）
+    await checkAgreements();
 
     logToConsole('所有乘机人信息填写完成');
   }
@@ -835,7 +879,7 @@ v1.0~v1.5 (2025-09)
     panel.innerHTML = `
       <div id="ctrip-header" style="cursor: move; padding: 6px 10px; background: #ff6600; color: #fff;
            border-radius: 8px 8px 0 0; display: flex; justify-content: space-between; align-items: center;">
-        <span>携程商旅自动填写 v3.2</span>
+        <span>携程商旅自动填写 v3.3</span>
         <button id="ctrip-min" style="background: transparent; border: none; color: #fff; font-size: 14px; cursor: pointer;">—</button>
       </div>
       <div id="ctrip-body" style="padding: 8px;">
@@ -924,6 +968,7 @@ v1.0~v1.5 (2025-09)
       if (arr.length > 0) {
         await fillPassengerCard(0, arr[0]);
         await fillContactSection();
+        await checkAgreements();
       } else {
         logToConsole('请先解析护照信息');
       }
